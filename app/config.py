@@ -89,14 +89,26 @@ class AppSettings(BaseSettings):
     2. YAML file (`configs/strategy.yaml`).
     3. Default values defined in the models.
     """
+    # --- Core Application Settings ---
+    database_url: str = Field(..., env="DATABASE_URL")
+    telegram_bot_token: str = Field("", env="TELEGRAM_BOT_TOKEN")
+    app_env: str = Field("local", env="APP_ENV")
+    db_pool_size: int = Field(10, env="DB_POOL_SIZE")
+
+    # --- Strategy-specific Settings ---
     strategy: StrategySettings = Field(default_factory=StrategySettings)
 
     model_config = SettingsConfigDict(
         # For environment variables, use a prefix and nested delimiter
-        env_prefix="APP_",
+        # We are not using a global prefix anymore since we specify `env` directly.
+        # env_prefix="APP_",
         env_nested_delimiter='__',
         # Allow case-insensitive env vars
-        case_sensitive=False
+        case_sensitive=False,
+        # Load from .env file if it exists
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
     )
 
     @classmethod
