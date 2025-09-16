@@ -1,0 +1,46 @@
+# Strategy Parameters based on M4 from NEXT_STEPS_TODO_v2.md
+# This file provides default settings for the StrategyAgent.
+# These values can be overridden by environment variables.
+
+# Time frame mapping
+timeframes:
+  trend: "1d" # Primary trend timeframe (e.g., 1d, 4h)
+  entry: "1h" # Entry signal timeframe (e.g., 1h, 15m)
+
+# Volume confirmation settings
+volume_confirmation:
+  enabled: true
+  ma_period: 20
+  multiplier: 1.5 # Breakout confirmed if volume is >= 1.5x the 20-period MA
+
+# Retest definition (as a descriptive string/flag)
+retest_rule:
+  # Defines what constitutes a successful retest of a support/resistance level.
+  # "candle_close_confirmation" means the price must retest the level and then
+  # a candle must close back above (for support) or below (for resistance).
+  success_condition: "candle_close_confirmation"
+
+# Stop-loss, take-profit, and trailing stop settings
+risk_management:
+  # Method for calculating stop-loss: "atr" or "percentage"
+  stop_loss_method: "atr"
+  atr_period: 14
+  atr_multiplier: 2.0
+  percentage_sl: 3.0 # e.g., 3.0 means a 3% stop-loss from entry
+
+  # Invalidation point logic is complex and will be handled in the agent's logic,
+  # but these parameters can guide it.
+
+# Default risk ratio per trade
+default_risk:
+  # The percentage of total capital to risk on a single trade.
+  ratio: 1.0 # e.g., 1.0 means 1% of capital
+
+# Signal confidence and cooldown
+signal_confidence:
+  # Minimum confidence threshold required to consider a signal valid.
+  # This is a placeholder for a future scoring system.
+  threshold: 0.7 # e.g., 70% confidence
+  # Cooldown period in seconds after a signal is generated for the same symbol
+  # to avoid rapid-fire trades. 0 to disable.
+  cooldown_seconds: 3600 # 1 hour
