@@ -85,16 +85,17 @@ class ExecutionAgent(Agent):
             self.logger.error(f"Database error while fetching instrument ID for {symbol}: {e}")
             return None
 
-    def _execute_decision(self, decision: TradingDecision):
+    def _execute_decision(self, decision: TradingDecision) -> int | None:
         """
         Handles the database insertion of the order, ensuring idempotency.
+        Returns the new order ID if successful, otherwise None.
         """
         idempotency_key = self._generate_idempotency_key(decision)
         self.logger.info(f"Generated idempotency key: {idempotency_key}")
 
         exchange_instrument_id = self._get_exchange_instrument_id(decision.symbol)
         if exchange_instrument_id is None:
-            return # Error already logged in the helper method
+            return None # Error already logged in the helper method
 
         # We assume a 'market' order for now, as it's not in TradingDecision.
         # Price is NULL for market orders.
@@ -126,6 +127,7 @@ class ExecutionAgent(Agent):
                 self.db.commit()
                 self.logger.info(f"Successfully inserted order with ID: {order_id} and idempotency_key: {idempotency_key}")
                 self.logger.info("TODO: Submit order to the exchange via CCXT.")
+                return order_id
 
         except psycopg.errors.UniqueViolation:
             self.logger.warning(
@@ -133,12 +135,15 @@ class ExecutionAgent(Agent):
                 "The order has already been processed. Suppressing."
             )
             self.db.rollback()
+            return None
 
         except psycopg.errors.RaiseException as e:
             # This is likely from our trg_orders_normalize trigger
             self.logger.error(f"Order rejected by database trigger: {e}")
             self.db.rollback()
+            return None
 
         except psycopg.Error as e:
             self.logger.critical(f"An unexpected database error occurred: {e}")
             self.db.rollback()
+            return None
