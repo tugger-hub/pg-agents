@@ -1,0 +1,9 @@
+httpx
+ccxt
+pydantic
+psycopg
+sqlalchemy
+apscheduler
+python-telegram-bot
+pytest
+testcontainers
