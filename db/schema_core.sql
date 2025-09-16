@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS positions (
     exchange_instrument_id INT NOT NULL REFERENCES exchange_instruments(id),
     quantity NUMERIC NOT NULL DEFAULT 0,
     average_entry_price NUMERIC NOT NULL DEFAULT 0,
-    updated_at TIMESTAMTz NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(account_id, exchange_instrument_id)
 );
 
