@@ -119,11 +119,37 @@ class IngestionAgent(Agent):
                     return None
         return None
 
+from ..config import settings
+
+
 class StrategyAgent(Agent):
-    """Generates trading decisions based on market data."""
+    """
+    Generates trading decisions based on market data and configured strategy
+    parameters.
+    """
+
+    def __init__(self):
+        """Initializes the agent with strategy settings from the config."""
+        self.logger = logging.getLogger(self.__class__.__name__)
+        # Load strategy settings from the central config object
+        self.strategy_settings = settings.strategy
+        self.logger.info("StrategyAgent initialized with the following settings:")
+        self.logger.info(f"Timeframes: {self.strategy_settings.timeframes.model_dump_json()}")
+        self.logger.info(f"Volume Confirmation: {self.strategy_settings.volume_confirmation.model_dump_json()}")
+        self.logger.info(f"Risk Management: {self.strategy_settings.risk_management.model_dump_json()}")
+
     def run(self):
-        logger.info("StrategyAgent running...")
-        # In the future, this will analyze data and produce TradingDecision objects.
+        """
+        The main entry point for the agent's logic.
+
+        For now, it just logs that it's running. In a real implementation, it
+        would analyze market data and generate TradingDecision objects based on
+        the loaded strategy parameters.
+        """
+        self.logger.info("StrategyAgent running...")
+        # Example of accessing a specific parameter:
+        # if self.strategy_settings.volume_confirmation.enabled:
+        #     self.logger.debug("Volume confirmation is enabled.")
         pass
 
 class ExecutionAgent(Agent):
