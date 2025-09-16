@@ -16,6 +16,7 @@ from app.agents.execution import ExecutionAgent
 from app.agents.risk import RiskAgent
 # Skeletons can be used for agents not yet implemented
 from app.agents.skeletons import IngestionAgent, StrategyAgent, ReportAgent
+from app.agents.notification import NotifyWorker
 
 # Configure logging
 setup_logging()
@@ -48,6 +49,15 @@ def main():
     risk_agent = RiskAgent(db_connection=db_connection, execution_agent=execution_agent)
 
     report_agent = ReportAgent()
+
+    # Instantiate the notification worker
+    if settings.telegram_bot_token:
+        notify_worker = NotifyWorker(db_connection=db_connection)
+        scheduler.add_job(notify_worker.run, 'interval', seconds=5, id='notify_worker')
+        logger.info("Notification worker has been scheduled.")
+    else:
+        logger.warning("TELEGRAM_BOT_TOKEN not set. Notification worker will not run.")
+
 
     # Schedule agents to run periodically
     # Note: The `execution_agent.run` expects a `TradingDecision`, so scheduling it
