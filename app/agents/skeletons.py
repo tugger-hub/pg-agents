@@ -152,13 +152,6 @@ class StrategyAgent(Agent):
         #     self.logger.debug("Volume confirmation is enabled.")
         pass
 
-class ExecutionAgent(Agent):
-    """Executes trades based on trading decisions."""
-    def run(self):
-        logger.info("ExecutionAgent running...")
-        # In the future, this will place orders with the broker.
-        pass
-
 class RiskAgent(Agent):
     """Manages risk for open positions."""
     def run(self):
