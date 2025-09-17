@@ -308,3 +308,39 @@ class RiskAgent(Agent):
 
         else:
             self.logger.warning(f"Action '{action}' is not yet implemented.")
+
+
+def calculate_r_multiple(
+    entry_price: float,
+    current_price: float,
+    stop_loss_price: float,
+    side: TradeSide,
+) -> float | None:
+    """
+    Calculates the current profit/loss of a potential or open trade
+    in terms of "R" (initial risk multiple).
+
+    This is a pure function, making it easy to unit test.
+
+    Args:
+        entry_price: The average entry price of the position.
+        current_price: The current market price.
+        stop_loss_price: The price at which the position would be stopped out.
+        side: The side of the trade (BUY or SELL).
+
+    Returns:
+        The R-multiple as a float (e.g., 2.5 means 2.5x the initial risk in profit),
+        or None if the initial risk is zero (cannot divide by zero).
+    """
+    initial_risk_per_unit = abs(entry_price - stop_loss_price)
+    if initial_risk_per_unit == 0:
+        return None
+
+    if side == TradeSide.BUY:
+        profit_per_unit = current_price - entry_price
+    elif side == TradeSide.SELL:
+        profit_per_unit = entry_price - current_price
+    else:
+        return None
+
+    return profit_per_unit / initial_risk_per_unit
