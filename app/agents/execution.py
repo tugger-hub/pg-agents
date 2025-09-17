@@ -66,14 +66,18 @@ class ExecutionAgent(Agent):
         """
         Fetches the exchange_instrument_id from the database for a given symbol.
         """
+        # This query robustly handles both generic symbols (e.g., 'BTC/USD') and
+        # exchange-specific symbols (e.g., 'BTCUSD').
         query = """
-        SELECT ei.id FROM exchange_instruments ei
-        JOIN instruments i ON ei.instrument_id = i.id
-        WHERE i.symbol = %s;
+        SELECT ei.id
+        FROM exchange_instruments ei
+        LEFT JOIN instruments i ON ei.instrument_id = i.id
+        WHERE i.symbol = %s OR ei.exchange_symbol = %s;
         """
         try:
             with self.db.cursor() as cursor:
-                cursor.execute(query, (symbol,))
+                # Pass the symbol for both WHERE clause conditions
+                cursor.execute(query, (symbol, symbol))
                 result = cursor.fetchone()
                 if result:
                     self.logger.info(f"Found exchange_instrument_id: {result[0]} for symbol {symbol}")
@@ -99,6 +103,9 @@ class ExecutionAgent(Agent):
 
         # We assume a 'market' order for now, as it's not in TradingDecision.
         # Price is NULL for market orders.
+        # Use quantity from the decision if provided, otherwise use the placeholder default.
+        quantity_to_use = decision.quantity if decision.quantity is not None else 0.01
+
         order_to_insert = {
             "account_id": self.account_id,
             "exchange_instrument_id": exchange_instrument_id,
@@ -106,7 +113,7 @@ class ExecutionAgent(Agent):
             "side": decision.side.value,
             "type": "market",
             "status": "NEW",
-            "quantity": 0.01, # Placeholder quantity
+            "quantity": quantity_to_use,
             "price": None, # Market orders don't have a price
         }
 

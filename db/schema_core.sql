@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS orders (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS executions (
+    id BIGSERIAL PRIMARY KEY,
+    order_id BIGINT NOT NULL REFERENCES orders(id),
+    price NUMERIC NOT NULL,
+    quantity NUMERIC NOT NULL,
+    fee NUMERIC,
+    fee_currency VARCHAR(10),
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
     id BIGSERIAL PRIMARY KEY,
     account_id INT NOT NULL REFERENCES accounts(id),
@@ -92,6 +102,7 @@ CREATE TABLE IF NOT EXISTS positions (
     exchange_instrument_id INT NOT NULL REFERENCES exchange_instruments(id),
     quantity NUMERIC NOT NULL DEFAULT 0,
     average_entry_price NUMERIC NOT NULL DEFAULT 0,
+    initial_stop_loss NUMERIC, -- Critical for R-multiple calculation in RiskAgent
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(account_id, exchange_instrument_id)
 );
@@ -173,7 +184,7 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_notification_outbox_dedupe
-  ON notification_outbox(dedupe_key) WHERE dedupe_key IS NOT NULL;
+  ON notification_outbox(dedupe_key);
 
 CREATE OR REPLACE FUNCTION enqueue_notification(
   p_chat_id BIGINT,

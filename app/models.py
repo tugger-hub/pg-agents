@@ -19,6 +19,7 @@ class TradingDecision(BaseModel):
     """
     symbol: str = Field(..., description="The trading symbol, e.g., 'BTC/USDT'")
     side: TradeSide = Field(..., description="The side of the trade, either 'buy' or 'sell'")
+    quantity: Optional[float] = Field(None, description="The quantity to trade. If None, a default is used.")
     stop_loss: float = Field(..., alias='sl', description="The price at which to cut losses")
     take_profit: float = Field(..., alias='tp', description="The price at which to take profit")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence level of the decision, from 0.0 to 1.0")
