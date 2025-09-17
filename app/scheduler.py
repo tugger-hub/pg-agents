@@ -10,7 +10,7 @@ import psycopg
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from app.log_config import setup_logging
-from app.config import settings
+from app.config import get_settings
 # Import the REAL agents, not the skeletons
 from app.agents.execution import ExecutionAgent
 from app.agents.risk import RiskAgent
@@ -29,6 +29,7 @@ def main():
     """
     Initializes and starts the agent scheduler.
     """
+    settings = get_settings()
     logger.info("Initializing scheduler and database connection...")
 
     try:
