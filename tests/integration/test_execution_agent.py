@@ -193,3 +193,37 @@ def test_order_failing_min_notional_check_is_rejected(db_connection_with_failing
     assert "Order rejected by database trigger" in caplog.text
     # The specific error message from the trigger in schema_core.sql
     assert "min notional violation" in caplog.text
+
+
+def test_execution_agent_blocks_order_when_kill_switch_is_on(db_connection, caplog):
+    """
+    Tests that the ExecutionAgent does not create an order if the global kill
+    switch is disabled in the system_configuration table (M10 Guardrail).
+    """
+    # Arrange
+    # 1. Disable trading via the kill switch in the database
+    with db_connection.cursor() as cursor:
+        # The system_configuration table should have been created and seeded by schema_core.sql
+        cursor.execute("UPDATE system_configuration SET is_trading_enabled = FALSE WHERE id = 1")
+    db_connection.commit()
+    logger.info("Kill switch has been disabled for this test.")
+
+    # 2. Set up the agent and the decision
+    agent = ExecutionAgent(db_connection=db_connection, account_id=1)
+    decision = TradingDecision(
+        symbol="BTC/USDT",
+        side=TradeSide.BUY,
+        sl=60000.0,
+        tp=70000.0,
+        confidence=0.9,
+    )
+
+    # Act
+    agent.run(decision)
+
+    # Assert
+    # 1. No order should have been created
+    assert count_orders(db_connection) == 0, "No order should be created when the kill switch is off."
+
+    # 2. A warning should have been logged, matching the log in ExecutionAgent
+    assert "Trading is disabled (kill switch is ON or system config is missing)" in caplog.text

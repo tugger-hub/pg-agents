@@ -220,3 +220,16 @@ CREATE TABLE IF NOT EXISTS ops_kpi_snapshots (
   position_gross_exposure_usd NUMERIC,
   open_positions_count INT
 );
+
+
+-- Section: System-wide Configuration for Guardrails (M10)
+CREATE TABLE IF NOT EXISTS system_configuration (
+    id INT PRIMARY KEY CHECK (id = 1),
+    is_trading_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    daily_loss_limit_usd NUMERIC(15, 2) NOT NULL DEFAULT 1000.00,
+    weekly_loss_limit_usd NUMERIC(15, 2) NOT NULL DEFAULT 3000.00,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Insert the default singleton configuration row if it doesn't exist.
+INSERT INTO system_configuration (id) VALUES (1) ON CONFLICT (id) DO NOTHING;

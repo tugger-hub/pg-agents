@@ -52,3 +52,16 @@ class OpsKpiSnapshot(BaseModel):
     order_retry_rate: Optional[float] = Field(None, description="Ratio of retried orders")
     position_gross_exposure_usd: Optional[float] = Field(None, description="Gross exposure of all positions in USD")
     open_positions_count: Optional[int] = Field(None, description="Total number of open positions")
+
+
+class SystemConfiguration(BaseModel):
+    """
+    Represents the system-wide configuration for trading guardrails.
+
+    This model corresponds to the `system_configuration` table.
+    """
+    id: int = Field(..., description="Singleton ID of the configuration row, always 1")
+    is_trading_enabled: bool = Field(..., description="Global kill switch for all trading activity")
+    daily_loss_limit_usd: float = Field(..., description="The maximum daily loss allowed in USD before trading is halted")
+    weekly_loss_limit_usd: float = Field(..., description="The maximum weekly loss allowed in USD before trading is halted")
+    updated_at: datetime = Field(..., description="The timestamp when the configuration was last updated")
