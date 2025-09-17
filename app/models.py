@@ -3,6 +3,7 @@ Data models for the trading application, using Pydantic for validation.
 """
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 from pydantic import BaseModel, Field
 
 class TradeSide(str, Enum):
@@ -35,3 +36,18 @@ class MarketSnapshot(BaseModel):
     low: float = Field(..., description="The lowest price of the candle")
     close: float = Field(..., description="The closing price of the candle")
     volume: float = Field(..., description="The trading volume of the candle")
+
+
+class OpsKpiSnapshot(BaseModel):
+    """
+    Represents a snapshot of operational KPIs.
+
+    This model corresponds to the `ops_kpi_snapshots` table.
+    """
+    ts: datetime = Field(..., description="The timestamp of the KPI snapshot (UTC)")
+    order_latency_p50_ms: Optional[int] = Field(None, description="p50 order latency in milliseconds")
+    order_latency_p95_ms: Optional[int] = Field(None, description="p95 order latency in milliseconds")
+    order_failure_rate: Optional[float] = Field(None, description="Ratio of failed orders")
+    order_retry_rate: Optional[float] = Field(None, description="Ratio of retried orders")
+    position_gross_exposure_usd: Optional[float] = Field(None, description="Gross exposure of all positions in USD")
+    open_positions_count: Optional[int] = Field(None, description="Total number of open positions")

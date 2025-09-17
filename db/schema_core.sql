@@ -197,3 +197,15 @@ BEGIN
     RETURN v_id;
   END IF;
 END; $$ LANGUAGE plpgsql;
+
+
+-- Section 5.4: KPI Snapshots (from Plus optional module)
+CREATE TABLE IF NOT EXISTS ops_kpi_snapshots (
+  ts TIMESTAMPTZ PRIMARY KEY DEFAULT NOW(),
+  order_latency_p50_ms INT,
+  order_latency_p95_ms INT,
+  order_failure_rate NUMERIC,
+  order_retry_rate NUMERIC,
+  position_gross_exposure_usd NUMERIC,
+  open_positions_count INT
+);
