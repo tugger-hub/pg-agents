@@ -1,7 +1,7 @@
 httpx
 ccxt
 pydantic
-psycopg[binary]
+psycopg[binary,pool]
 sqlalchemy
 apscheduler
 python-telegram-bot
@@ -9,3 +9,5 @@ pytest
 testcontainers[postgres]
 pydantic-settings
 PyYAML
+fastapi
+uvicorn[standard]

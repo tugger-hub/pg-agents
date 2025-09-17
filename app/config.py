@@ -63,81 +63,54 @@ class StrategySettings(BaseModel):
 
 # --- Pydantic-Settings Integration ---
 
-def yaml_config_source(settings: BaseSettings) -> Dict[str, Any]:
-    """
-    A pydantic-settings source that loads settings from a YAML file.
-    """
-    config_path = BASE_DIR / "configs" / "strategy.yaml"
-    if not config_path.is_file():
-        logger.warning(f"YAML config file not found at: {config_path}")
-        return {}
+from functools import lru_cache
 
-    try:
-        with open(config_path, "r") as f:
-            return yaml.safe_load(f) or {}
-    except (IOError, yaml.YAMLError) as e:
-        logger.error(f"Error reading or parsing YAML config: {e}")
-        return {}
 
+# --- Pydantic-Settings Integration ---
+
+# NOTE: Custom YAML source is disabled to resolve testing issues.
+# Strategy parameters should be set via environment variables.
+# Example: APP_STRATEGY__RISK_MANAGEMENT__PERCENTAGE_SL=5.0
 
 class AppSettings(BaseSettings):
     """
     The main settings class for the application.
-
-    It loads settings from the following sources, in order of precedence:
-    1. Environment variables (e.g., `STRATEGY_TIMEFRAMES_TREND=4h`).
-    2. YAML file (`configs/strategy.yaml`).
-    3. Default values defined in the models.
     """
     # --- Core Application Settings ---
     database_url: str = Field(..., env="DATABASE_URL")
     telegram_bot_token: str = Field("", env="TELEGRAM_BOT_TOKEN")
     app_env: str = Field("local", env="APP_ENV")
     db_pool_size: int = Field(10, env="DB_POOL_SIZE")
+    webhook_secret_token: str = Field("", env="WEBHOOK_SECRET_TOKEN")
 
     # --- Strategy-specific Settings ---
     strategy: StrategySettings = Field(default_factory=StrategySettings)
 
     model_config = SettingsConfigDict(
-        # For environment variables, use a prefix and nested delimiter
-        # We are not using a global prefix anymore since we specify `env` directly.
-        # env_prefix="APP_",
         env_nested_delimiter='__',
-        # Allow case-insensitive env vars
         case_sensitive=False,
-        # Load from .env file if it exists
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore"
     )
 
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """
-        Define the order of configuration sources.
-        We place the YAML source after init_settings but before env_settings.
-        """
-        return (
-            init_settings,
-            env_settings,
-            yaml_config_source, # Our custom YAML source
-        )
+# --- Singleton Getter ---
+@lru_cache()
+def get_settings() -> AppSettings:
+    """
+    Returns a cached singleton instance of the AppSettings.
+    The lru_cache decorator ensures that the AppSettings is only instantiated once.
+    This approach defers the instantiation until the settings are actually needed,
+    which is crucial for testing environments where settings might be patched.
+    """
+    return AppSettings()
 
-# --- Singleton Instance ---
-# Create a single instance of the settings to be used throughout the application.
-settings = AppSettings()
 
 # Optional: Log the loaded settings at startup for verification
 if __name__ == "__main__":
     import json
     logging.basicConfig(level=logging.INFO)
     logger.info("Loaded application settings:")
+    settings = get_settings()
     # Using model_dump_json for clean, pretty-printed output
     print(json.dumps(settings.model_dump(), indent=2))

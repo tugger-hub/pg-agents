@@ -65,3 +65,18 @@ class SystemConfiguration(BaseModel):
     daily_loss_limit_usd: float = Field(..., description="The maximum daily loss allowed in USD before trading is halted")
     weekly_loss_limit_usd: float = Field(..., description="The maximum weekly loss allowed in USD before trading is halted")
     updated_at: datetime = Field(..., description="The timestamp when the configuration was last updated")
+
+
+class TradingViewAlert(BaseModel):
+    """
+    Represents the payload of a webhook alert from TradingView.
+
+    This model is based on the example provided in the design documents.
+    """
+    symbol: str
+    side: str
+    qty: float
+    price: float
+    ts: datetime
+    strategy: str
+    idempotency_key: str
