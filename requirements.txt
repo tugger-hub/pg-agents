@@ -6,6 +6,6 @@ sqlalchemy
 apscheduler
 python-telegram-bot
 pytest
-testcontainers
+testcontainers[postgres]
 pydantic-settings
 PyYAML
