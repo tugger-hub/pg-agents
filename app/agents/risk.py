@@ -4,6 +4,7 @@ risk management rules, such as trailing stops or partial profit taking.
 """
 import logging
 import psycopg
+from decimal import Decimal
 
 from .base import Agent
 from .execution import ExecutionAgent
@@ -65,7 +66,8 @@ class RiskAgent(Agent):
             p.exchange_instrument_id,
             ei.exchange_symbol,
             p.quantity,
-            p.average_entry_price
+            p.average_entry_price,
+            p.initial_stop_loss
         FROM positions p
         JOIN exchange_instruments ei ON p.exchange_instrument_id = ei.id
         WHERE p.account_id = %s AND p.quantity != 0;
@@ -119,24 +121,28 @@ class RiskAgent(Agent):
         """
         Calculates the position's current PnL and evaluates it against risk rules.
         """
-        # TODO: The 'initial_stop_loss' is critical for R-multiple calculation.
-        # This field needs to be added to the 'positions' table in the database
-        # and populated when a position is opened. For now, we simulate it.
-        if 'initial_stop_loss' not in position:
-            position['initial_stop_loss'] = position['average_entry_price'] * 0.98
+        # Ensure all numeric values from the DB are treated as Decimals
+        entry_price = Decimal(position['average_entry_price'])
+        quantity = Decimal(position['quantity'])
+        initial_sl = position.get('initial_stop_loss')
+
+        if initial_sl is None:
+            # This logic branch is for backward compatibility or missing data.
+            # In our E2E test, we ensure initial_stop_loss is set.
+            initial_sl = entry_price * Decimal('0.98')
             self.logger.warning(
                 f"Position {position['id']} is missing 'initial_stop_loss'. "
-                f"Simulating a 2% SL at {position['initial_stop_loss']}"
+                f"Simulating a 2% SL at {initial_sl}"
             )
-
-        entry_price = float(position['average_entry_price'])
-        initial_sl = float(position['initial_stop_loss'])
-        quantity = float(position['quantity'])
+        else:
+            initial_sl = Decimal(initial_sl)
 
         current_price = self._get_current_market_price(position['exchange_symbol'])
         if current_price is None:
             self.logger.error(f"Could not fetch market price for {position['exchange_symbol']}. Skipping evaluation.")
             return
+
+        current_price = Decimal(current_price)
 
         # --- R-Multiple Calculation ---
         initial_risk_per_unit = abs(entry_price - initial_sl)
@@ -155,6 +161,8 @@ class RiskAgent(Agent):
         for rule in sorted(self.risk_rules, key=lambda r: r['profit_r'], reverse=True):
             if r_multiple >= rule['profit_r']:
                 self.logger.info(f"TRIGGERED: Rule '{rule['name']}' for position {position['id']} at R={r_multiple:.2f}")
+                # Add the calculated R-multiple to the position dict to pass to the action executor
+                position['r_multiple'] = r_multiple
                 # TODO: Add state to prevent re-triggering the same rule for the same position.
                 # For now, we assume it's okay to re-evaluate every cycle.
                 self._execute_risk_action(position, rule)
@@ -170,13 +178,15 @@ class RiskAgent(Agent):
 
         # For now, we only implement 'close_partial'. Other actions are placeholders.
         if action == "close_partial":
-            percentage = rule.get("params", {}).get("percentage", 0.0)
-            if not (0 < percentage <= 1.0):
+            percentage_str = str(rule.get("params", {}).get("percentage", "0.0"))
+            percentage = Decimal(percentage_str)
+
+            if not (Decimal('0') < percentage <= Decimal('1.0')):
                 self.logger.error(f"Invalid percentage {percentage} for close_partial. Must be between 0 and 1.")
                 return
 
             # 1. Determine order parameters
-            position_qty = float(position['quantity'])
+            position_qty = Decimal(position['quantity'])
             close_qty = position_qty * percentage
             # Side is the opposite of the current position
             close_side = TradeSide.SELL if position_qty > 0 else TradeSide.BUY
@@ -185,10 +195,10 @@ class RiskAgent(Agent):
             decision = TradingDecision(
                 symbol=position['exchange_symbol'],
                 side=close_side,
-                quantity=close_qty, # TODO: Quantity needs to be normalized by ExecutionAgent
-                # SL/TP for a closing order is typically not needed
-                stop_loss=None,
-                take_profit=None,
+                quantity=float(close_qty), # Pass the calculated quantity
+                # SL/TP for a closing order is typically not needed. Pydantic requires them.
+                sl=0,
+                tp=0,
                 confidence=1.0 # High confidence as it's a risk management action
             )
 
