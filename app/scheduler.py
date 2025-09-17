@@ -14,8 +14,11 @@ from app.config import settings
 # Import the REAL agents, not the skeletons
 from app.agents.execution import ExecutionAgent
 from app.agents.risk import RiskAgent
+# Import the REAL agents, not the skeletons
+from app.agents.kpi import KpiAgent
+from app.agents.report import ReportAgent
 # Skeletons can be used for agents not yet implemented
-from app.agents.skeletons import IngestionAgent, StrategyAgent, ReportAgent
+from app.agents.skeletons import IngestionAgent, StrategyAgent
 from app.agents.notification import NotifyWorker
 
 # Configure logging
@@ -47,8 +50,8 @@ def main():
     # Instantiate the real, functional agents
     execution_agent = ExecutionAgent(db_connection=db_connection)
     risk_agent = RiskAgent(db_connection=db_connection, execution_agent=execution_agent)
-
-    report_agent = ReportAgent()
+    kpi_agent = KpiAgent(db_connection=db_connection)
+    report_agent = ReportAgent(db_connection=db_connection)
 
     # Instantiate the notification worker
     if settings.telegram_bot_token:
@@ -67,7 +70,10 @@ def main():
     scheduler.add_job(strategy_agent.run, 'interval', seconds=60, id='strategy_agent')
     # scheduler.add_job(execution_agent.run, 'interval', seconds=20, id='execution_agent')
     scheduler.add_job(risk_agent.run, 'interval', seconds=30, id='risk_agent')
-    scheduler.add_job(report_agent.run, 'interval', seconds=120, id='report_agent')
+
+    # Schedule the new KPI and Report agents
+    scheduler.add_job(kpi_agent.run, 'interval', minutes=5, id='kpi_agent')
+    scheduler.add_job(report_agent.run, 'interval', hours=1, id='report_agent')
 
     try:
         logger.info("Scheduler started. Press Ctrl+C to exit.")
