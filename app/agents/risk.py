@@ -5,10 +5,13 @@ risk management rules, such as trailing stops or partial profit taking.
 import logging
 import psycopg
 from decimal import Decimal
+from datetime import datetime, timezone
 
 from .base import Agent
 from .execution import ExecutionAgent
-from ..models import TradingDecision, TradeSide
+from ..models import TradingDecision, TradeSide, SystemConfiguration
+from ..services.system import get_system_configuration, set_trading_enabled
+from ..kpi.services import get_daily_pnl, get_weekly_pnl
 
 logger = logging.getLogger(__name__)
 
@@ -88,12 +91,67 @@ class RiskAgent(Agent):
         self.logger.info(f"Found {len(positions)} active position(s).")
         return positions
 
+    def _check_global_loss_limits(self):
+        """
+        M10 Guardrail: Checks daily and weekly PnL against configured loss limits.
+        If a limit is breached, it activates the global kill switch and sends a CRITICAL alert.
+        """
+        # First, check if trading is already disabled. If so, do nothing.
+        config = get_system_configuration(self.db)
+        if not config or not config.is_trading_enabled:
+            # No need to log here as the ExecutionAgent will log if it blocks trades.
+            return
+
+        # Get daily and weekly PnL
+        daily_pnl = get_daily_pnl(self.db)
+        weekly_pnl = get_weekly_pnl(self.db)
+        self.logger.info(f"PnL Check - Daily: ${daily_pnl:.2f}, Weekly: ${weekly_pnl:.2f}")
+
+        limit_breached = False
+        breach_reason = ""
+
+        # Loss limits are positive values, PnL is negative for a loss.
+        if daily_pnl < -config.daily_loss_limit_usd:
+            limit_breached = True
+            breach_reason = f"Daily loss limit of ${config.daily_loss_limit_usd:.2f} breached (Today's PnL: ${daily_pnl:.2f})"
+        elif weekly_pnl < -config.weekly_loss_limit_usd:
+            limit_breached = True
+            breach_reason = f"Weekly loss limit of ${config.weekly_loss_limit_usd:.2f} breached (This Week's PnL: ${weekly_pnl:.2f})"
+
+        if limit_breached:
+            self.logger.critical(f"LOSS LIMIT BREACHED: {breach_reason}")
+
+            # 1. Activate the kill switch
+            self.logger.info("Activating global kill switch due to loss limit breach.")
+            set_trading_enabled(self.db, False)
+
+            # 2. Send a CRITICAL notification
+            self.logger.info("Sending CRITICAL notification for loss limit breach.")
+            try:
+                with self.db.cursor() as cursor:
+                    # In a real system, this chat_id would come from a config for admin alerts.
+                    admin_chat_id = 1
+                    notify_sql = "SELECT enqueue_notification(%s, 'CRITICAL', %s, %s, %s);"
+                    title = "!!! TRADING HALTED - LOSS LIMIT BREACHED !!!"
+                    dedupe_key = f"loss-limit-breach-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+                    cursor.execute(notify_sql, (admin_chat_id, title, breach_reason, dedupe_key))
+                    self.db.commit()
+                    self.logger.info("Successfully enqueued CRITICAL notification.")
+            except psycopg.Error as e:
+                self.logger.error(f"Failed to enqueue CRITICAL notification for loss limit breach: {e}")
+                self.db.rollback()
+
+
     def run(self):
         """
         The main entry point for the agent's logic.
         This method is called periodically by the scheduler.
         """
         self.logger.info("Running risk management cycle...")
+
+        # --- M10 Guardrail: Global Loss Limit Check ---
+        self._check_global_loss_limits()
+
         active_positions = self._get_active_positions()
 
         if not active_positions:

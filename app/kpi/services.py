@@ -2,7 +2,7 @@
 Service layer for calculating and retrieving operational KPIs.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
 import psycopg
@@ -10,6 +10,67 @@ import psycopg
 from app.models import OpsKpiSnapshot
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_realized_pnl_for_period(
+    db_conn: psycopg.Connection, start_utc: datetime, end_utc: datetime
+) -> float:
+    """
+    Calculates the sum of realized PnL from the transactions table over a given period.
+
+    This includes transaction types that represent profit or loss, such as
+    realized gains/losses, fees, and funding payments.
+
+    Args:
+        db_conn: An active database connection.
+        start_utc: The start of the period (inclusive), timezone-aware (UTC).
+        end_utc: The end of the period (exclusive), timezone-aware (UTC).
+
+    Returns:
+        The total realized PnL as a float. Returns 0.0 if no transactions found.
+    """
+    # These are the transaction types assumed to contribute to realized PnL.
+    pnl_transaction_types = ("REALIZED_PNL", "FEE", "FUNDING")
+    try:
+        with db_conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0.0)
+                FROM transactions
+                WHERE transaction_type = ANY(%s)
+                  AND timestamp >= %s
+                  AND timestamp < %s
+                """,
+                (list(pnl_transaction_types), start_utc, end_utc),
+            )
+            result = cursor.fetchone()
+            pnl = float(result[0]) if result else 0.0
+            logger.debug(f"Calculated PnL for {start_utc} to {end_utc}: {pnl:.2f}")
+            return pnl
+    except Exception as e:
+        logger.exception(
+            f"Error calculating PnL for period {start_utc} to {end_utc}: {e}"
+        )
+        return 0.0
+
+
+def get_daily_pnl(db_conn: psycopg.Connection) -> float:
+    """Calculates realized PnL for the current day (since midnight UTC)."""
+    now_utc = datetime.now(timezone.utc)
+    start_of_day_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    # The end time is exclusive, so using now_utc is correct.
+    return calculate_realized_pnl_for_period(db_conn, start_of_day_utc, now_utc)
+
+
+def get_weekly_pnl(db_conn: psycopg.Connection) -> float:
+    """Calculates realized PnL for the current week (since Monday midnight UTC)."""
+    now_utc = datetime.now(timezone.utc)
+    start_of_week_utc = (now_utc - timedelta(days=now_utc.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    # The end time is exclusive, so using now_utc is correct.
+    return calculate_realized_pnl_for_period(db_conn, start_of_week_utc, now_utc)
+
 
 def calculate_all_kpis(db_connection: psycopg.Connection) -> OpsKpiSnapshot:
     """

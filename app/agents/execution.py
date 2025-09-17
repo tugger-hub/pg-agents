@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import psycopg
 
 from ..models import TradingDecision, TradeSide
+from ..services.system import get_system_configuration
 from .base import Agent
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,15 @@ class ExecutionAgent(Agent):
         Handles the database insertion of the order, ensuring idempotency.
         Returns the new order ID if successful, otherwise None.
         """
+        # --- M10 Guardrail: Kill Switch Check ---
+        system_config = get_system_configuration(self.db)
+        if not system_config or not system_config.is_trading_enabled:
+            self.logger.warning(
+                "Trading is disabled (kill switch is ON or system config is missing). "
+                f"Discarding decision: {decision.model_dump_json()}"
+            )
+            return None
+
         idempotency_key = self._generate_idempotency_key(decision)
         self.logger.info(f"Generated idempotency key: {idempotency_key}")
 
