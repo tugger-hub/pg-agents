@@ -1,9 +1,6 @@
-httpx
 ccxt
 pydantic
-psycopg
-sqlalchemy
+psycopg2-binary
+python-dotenv
+websockets
 apscheduler
-python-telegram-bot
-pytest
-testcontainers

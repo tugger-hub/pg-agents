@@ -1,0 +1,12 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE settings
+.vscode/
+.idea/

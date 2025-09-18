@@ -96,6 +96,21 @@ CREATE TABLE IF NOT EXISTS positions (
     UNIQUE(account_id, exchange_instrument_id)
 );
 
+CREATE TABLE IF NOT EXISTS candles (
+    id BIGSERIAL PRIMARY KEY,
+    exchange_instrument_id INT NOT NULL REFERENCES exchange_instruments(id),
+    timeframe VARCHAR(10) NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    open NUMERIC NOT NULL,
+    high NUMERIC NOT NULL,
+    low NUMERIC NOT NULL,
+    close NUMERIC NOT NULL,
+    volume NUMERIC NOT NULL,
+    UNIQUE(exchange_instrument_id, timeframe, timestamp)
+);
+
+CREATE INDEX IF NOT EXISTS idx_candles_timestamp ON candles(timestamp DESC);
+
 
 -- Section 4.1: Order/Execution Core Integrity (from original design)
 -- Note: The ALTER TABLE is no longer needed as the column is in CREATE TABLE.

@@ -4,9 +4,10 @@ Main entry point for the application.
 This script initializes and runs the scheduler, which in turn triggers the agents.
 """
 import logging
+import asyncio
 import time
 
-from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.log_config import setup_logging
 from app.agents.skeletons import (
     IngestionAgent,
@@ -20,15 +21,15 @@ from app.agents.skeletons import (
 setup_logging()
 logger = logging.getLogger(__name__)
 
-def main():
+async def main():
     """
     Initializes and starts the agent scheduler.
     """
     logger.info("Initializing scheduler...")
-    scheduler = BlockingScheduler()
+    scheduler = AsyncIOScheduler()
 
     # Instantiate agents
-    ingestion_agent = IngestionAgent()
+    ingestion_agent = IngestionAgent(symbols=["BTC/USDT", "ETH/USDT"], exchange_id="gateio")
     strategy_agent = StrategyAgent()
     execution_agent = ExecutionAgent()
     risk_agent = RiskAgent()
@@ -42,12 +43,16 @@ def main():
     scheduler.add_job(risk_agent.run, 'interval', seconds=25, id='risk_agent')
     scheduler.add_job(report_agent.run, 'interval', seconds=30, id='report_agent')
 
+    scheduler.start()
+    logger.info("Scheduler started. Press Ctrl+C to exit.")
+
     try:
-        logger.info("Scheduler started. Press Ctrl+C to exit.")
-        scheduler.start()
+        # Keep the script running until interrupted
+        while True:
+            await asyncio.sleep(3600)
     except (KeyboardInterrupt, SystemExit):
         logger.info("Scheduler stopped.")
-        scheduler.shutdown()
+        await scheduler.shutdown()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

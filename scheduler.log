@@ -1,0 +1,37 @@
+{"timestamp": "2025-09-18 07:53:17,264", "level": "INFO", "name": "__main__", "message": "Initializing scheduler..."}
+{"timestamp": "2025-09-18 07:53:17,278", "level": "INFO", "name": "apscheduler.scheduler", "message": "Adding job tentatively -- it will be properly scheduled when the scheduler starts"}
+{"timestamp": "2025-09-18 07:53:17,278", "level": "INFO", "name": "apscheduler.scheduler", "message": "Adding job tentatively -- it will be properly scheduled when the scheduler starts"}
+{"timestamp": "2025-09-18 07:53:17,278", "level": "INFO", "name": "apscheduler.scheduler", "message": "Adding job tentatively -- it will be properly scheduled when the scheduler starts"}
+{"timestamp": "2025-09-18 07:53:17,279", "level": "INFO", "name": "apscheduler.scheduler", "message": "Adding job tentatively -- it will be properly scheduled when the scheduler starts"}
+{"timestamp": "2025-09-18 07:53:17,279", "level": "INFO", "name": "apscheduler.scheduler", "message": "Adding job tentatively -- it will be properly scheduled when the scheduler starts"}
+{"timestamp": "2025-09-18 07:53:17,280", "level": "INFO", "name": "apscheduler.scheduler", "message": "Added job \"IngestionAgent.run\" to job store \"default\""}
+{"timestamp": "2025-09-18 07:53:17,280", "level": "INFO", "name": "apscheduler.scheduler", "message": "Added job \"StrategyAgent.run\" to job store \"default\""}
+{"timestamp": "2025-09-18 07:53:17,280", "level": "INFO", "name": "apscheduler.scheduler", "message": "Added job \"ExecutionAgent.run\" to job store \"default\""}
+{"timestamp": "2025-09-18 07:53:17,280", "level": "INFO", "name": "apscheduler.scheduler", "message": "Added job \"RiskAgent.run\" to job store \"default\""}
+{"timestamp": "2025-09-18 07:53:17,280", "level": "INFO", "name": "apscheduler.scheduler", "message": "Added job \"ReportAgent.run\" to job store \"default\""}
+{"timestamp": "2025-09-18 07:53:17,280", "level": "INFO", "name": "apscheduler.scheduler", "message": "Scheduler started"}
+{"timestamp": "2025-09-18 07:53:17,280", "level": "INFO", "name": "__main__", "message": "Scheduler started. Press Ctrl+C to exit."}
+{"timestamp": "2025-09-18 07:53:27,289", "level": "INFO", "name": "apscheduler.executors.default", "message": "Running job \"IngestionAgent.run (trigger: interval[0:00:10], next run at: 2025-09-18 07:53:37 UTC)\" (scheduled at 2025-09-18 07:53:27.278351+00:00)"}
+{"timestamp": "2025-09-18 07:53:27,289", "level": "INFO", "name": "IngestionAgent", "message": "IngestionAgent running for symbols: ['BTC/USDT', 'ETH/USDT']"}
+{"timestamp": "2025-09-18 07:53:27,289", "level": "INFO", "name": "IngestionAgent", "message": "Fetching and caching trading rules from database..."}
+{"timestamp": "2025-09-18 07:53:27,291", "level": "INFO", "name": "app.db_utils", "message": "Fetching trading rules for BTC/USDT from database..."}
+{"timestamp": "2025-09-18 07:53:27,292", "level": "ERROR", "name": "app.db_utils", "message": "Database connection failed: connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n"}
+{"timestamp": "2025-09-18 07:53:27,293", "level": "ERROR", "name": "IngestionAgent", "message": "Failed to fetch trading rules for BTC/USDT from DB: connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n"}
+{"timestamp": "2025-09-18 07:53:27,293", "level": "INFO", "name": "app.db_utils", "message": "Fetching trading rules for ETH/USDT from database..."}
+{"timestamp": "2025-09-18 07:53:27,294", "level": "ERROR", "name": "app.db_utils", "message": "Database connection failed: connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n"}
+{"timestamp": "2025-09-18 07:53:27,295", "level": "ERROR", "name": "IngestionAgent", "message": "Failed to fetch trading rules for ETH/USDT from DB: connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n"}
+{"timestamp": "2025-09-18 07:53:27,295", "level": "INFO", "name": "IngestionAgent", "message": "Fetching market data for BTC/USDT..."}
+{"timestamp": "2025-09-18 07:53:32,279", "level": "INFO", "name": "apscheduler.executors.default", "message": "Running job \"StrategyAgent.run (trigger: interval[0:00:15], next run at: 2025-09-18 07:53:47 UTC)\" (scheduled at 2025-09-18 07:53:32.278660+00:00)"}
+{"timestamp": "2025-09-18 07:53:32,280", "level": "INFO", "name": "app.agents.skeletons", "message": "StrategyAgent running..."}
+{"timestamp": "2025-09-18 07:53:32,280", "level": "INFO", "name": "apscheduler.executors.default", "message": "Job \"StrategyAgent.run (trigger: interval[0:00:15], next run at: 2025-09-18 07:53:47 UTC)\" executed successfully"}
+{"timestamp": "2025-09-18 07:53:34,374", "level": "INFO", "name": "IngestionAgent", "message": "Successfully fetched 100 snapshots for BTC/USDT."}
+{"timestamp": "2025-09-18 07:53:34,374", "level": "INFO", "name": "app.db_utils", "message": "Preparing to insert 100 candles into the database."}
+{"timestamp": "2025-09-18 07:53:34,375", "level": "ERROR", "name": "app.db_utils", "message": "Database connection failed: connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n"}
+{"timestamp": "2025-09-18 07:53:34,376", "level": "ERROR", "name": "IngestionAgent", "message": "Failed to store candles for BTC/USDT in DB: connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n"}
+{"timestamp": "2025-09-18 07:53:34,376", "level": "INFO", "name": "IngestionAgent", "message": "Fetching market data for ETH/USDT..."}
+{"timestamp": "2025-09-18 07:53:34,595", "level": "INFO", "name": "IngestionAgent", "message": "Successfully fetched 100 snapshots for ETH/USDT."}
+{"timestamp": "2025-09-18 07:53:34,596", "level": "INFO", "name": "app.db_utils", "message": "Preparing to insert 100 candles into the database."}
+{"timestamp": "2025-09-18 07:53:34,596", "level": "ERROR", "name": "app.db_utils", "message": "Database connection failed: connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n"}
+{"timestamp": "2025-09-18 07:53:34,597", "level": "ERROR", "name": "IngestionAgent", "message": "Failed to store candles for ETH/USDT in DB: connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n"}
+{"timestamp": "2025-09-18 07:53:34,597", "level": "INFO", "name": "IngestionAgent", "message": "Closing exchange connection."}
+{"timestamp": "2025-09-18 07:53:34,850", "level": "INFO", "name": "apscheduler.executors.default", "message": "Job \"IngestionAgent.run (trigger: interval[0:00:10], next run at: 2025-09-18 07:53:37 UTC)\" executed successfully"}
