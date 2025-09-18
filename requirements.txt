@@ -1,9 +1,14 @@
 httpx
 ccxt
 pydantic
-psycopg
+psycopg[binary]
 sqlalchemy
 apscheduler
 python-telegram-bot
 pytest
-testcontainers
+testcontainers[postgres]
+pydantic-settings
+PyYAML
+pandas
+numpy
+pytest-mock

@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS orders (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS executions (
+    id BIGSERIAL PRIMARY KEY,
+    order_id BIGINT NOT NULL REFERENCES orders(id),
+    price NUMERIC NOT NULL,
+    quantity NUMERIC NOT NULL,
+    fee NUMERIC,
+    fee_currency VARCHAR(10),
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
     id BIGSERIAL PRIMARY KEY,
     account_id INT NOT NULL REFERENCES accounts(id),
@@ -92,7 +102,8 @@ CREATE TABLE IF NOT EXISTS positions (
     exchange_instrument_id INT NOT NULL REFERENCES exchange_instruments(id),
     quantity NUMERIC NOT NULL DEFAULT 0,
     average_entry_price NUMERIC NOT NULL DEFAULT 0,
-    updated_at TIMESTAMTz NOT NULL DEFAULT NOW(),
+    initial_stop_loss NUMERIC, -- Critical for R-multiple calculation in RiskAgent
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(account_id, exchange_instrument_id)
 );
 
@@ -173,7 +184,7 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_notification_outbox_dedupe
-  ON notification_outbox(dedupe_key) WHERE dedupe_key IS NOT NULL;
+  ON notification_outbox(dedupe_key);
 
 CREATE OR REPLACE FUNCTION enqueue_notification(
   p_chat_id BIGINT,
@@ -197,3 +208,53 @@ BEGIN
     RETURN v_id;
   END IF;
 END; $$ LANGUAGE plpgsql;
+
+
+-- Section 5.4: KPI Snapshots (from Plus optional module)
+CREATE TABLE IF NOT EXISTS ops_kpi_snapshots (
+  ts TIMESTAMPTZ PRIMARY KEY DEFAULT NOW(),
+  order_latency_p50_ms INT,
+  order_latency_p95_ms INT,
+  order_failure_rate NUMERIC,
+  order_retry_rate NUMERIC,
+  position_gross_exposure_usd NUMERIC,
+  open_positions_count INT
+);
+
+
+-- Section: System-wide Configuration for Guardrails (M10)
+CREATE TABLE IF NOT EXISTS system_configuration (
+    id INT PRIMARY KEY CHECK (id = 1),
+    is_trading_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    daily_loss_limit_usd NUMERIC(15, 2) NOT NULL DEFAULT 1000.00,
+    weekly_loss_limit_usd NUMERIC(15, 2) NOT NULL DEFAULT 3000.00,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Insert the default singleton configuration row if it doesn't exist.
+INSERT INTO system_configuration (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+
+-- Section: Market Data Storage (M3)
+-- Note: A periodic cleanup job should be implemented to enforce data retention
+-- policies (e.g., delete candles older than 30 days).
+CREATE TABLE IF NOT EXISTS candles (
+    id BIGSERIAL PRIMARY KEY,
+    symbol VARCHAR(50) NOT NULL,
+    timeframe VARCHAR(10) NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    open NUMERIC NOT NULL,
+    high NUMERIC NOT NULL,
+    low NUMERIC NOT NULL,
+    close NUMERIC NOT NULL,
+    volume NUMERIC NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Unique constraint to prevent duplicate candle entries
+CREATE UNIQUE INDEX IF NOT EXISTS ux_candles_symbol_tf_ts
+    ON candles (symbol, timeframe, timestamp);
+
+-- Index for efficient retrieval of recent candles for a symbol
+CREATE INDEX IF NOT EXISTS idx_candles_symbol_timestamp
+    ON candles (symbol, timestamp DESC);

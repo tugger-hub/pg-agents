@@ -3,6 +3,7 @@ Data models for the trading application, using Pydantic for validation.
 """
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 from pydantic import BaseModel, Field
 
 class TradeSide(str, Enum):
@@ -18,6 +19,7 @@ class TradingDecision(BaseModel):
     """
     symbol: str = Field(..., description="The trading symbol, e.g., 'BTC/USDT'")
     side: TradeSide = Field(..., description="The side of the trade, either 'buy' or 'sell'")
+    quantity: Optional[float] = Field(None, description="The quantity to trade. If None, a default is used.")
     stop_loss: float = Field(..., alias='sl', description="The price at which to cut losses")
     take_profit: float = Field(..., alias='tp', description="The price at which to take profit")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence level of the decision, from 0.0 to 1.0")
@@ -35,3 +37,31 @@ class MarketSnapshot(BaseModel):
     low: float = Field(..., description="The lowest price of the candle")
     close: float = Field(..., description="The closing price of the candle")
     volume: float = Field(..., description="The trading volume of the candle")
+
+
+class OpsKpiSnapshot(BaseModel):
+    """
+    Represents a snapshot of operational KPIs.
+
+    This model corresponds to the `ops_kpi_snapshots` table.
+    """
+    ts: datetime = Field(..., description="The timestamp of the KPI snapshot (UTC)")
+    order_latency_p50_ms: Optional[int] = Field(None, description="p50 order latency in milliseconds")
+    order_latency_p95_ms: Optional[int] = Field(None, description="p95 order latency in milliseconds")
+    order_failure_rate: Optional[float] = Field(None, description="Ratio of failed orders")
+    order_retry_rate: Optional[float] = Field(None, description="Ratio of retried orders")
+    position_gross_exposure_usd: Optional[float] = Field(None, description="Gross exposure of all positions in USD")
+    open_positions_count: Optional[int] = Field(None, description="Total number of open positions")
+
+
+class SystemConfiguration(BaseModel):
+    """
+    Represents the system-wide configuration for trading guardrails.
+
+    This model corresponds to the `system_configuration` table.
+    """
+    id: int = Field(..., description="Singleton ID of the configuration row, always 1")
+    is_trading_enabled: bool = Field(..., description="Global kill switch for all trading activity")
+    daily_loss_limit_usd: float = Field(..., description="The maximum daily loss allowed in USD before trading is halted")
+    weekly_loss_limit_usd: float = Field(..., description="The maximum weekly loss allowed in USD before trading is halted")
+    updated_at: datetime = Field(..., description="The timestamp when the configuration was last updated")

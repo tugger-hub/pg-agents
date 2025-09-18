@@ -6,15 +6,22 @@ This script initializes and runs the scheduler, which in turn triggers the agent
 import logging
 import time
 
+import psycopg
 from apscheduler.schedulers.blocking import BlockingScheduler
+
+from app.database import SessionLocal
 from app.log_config import setup_logging
-from app.agents.skeletons import (
-    IngestionAgent,
-    StrategyAgent,
-    ExecutionAgent,
-    RiskAgent,
-    ReportAgent,
-)
+from app.config import settings
+# Import the REAL agents, not the skeletons
+from app.agents.execution import ExecutionAgent
+from app.agents.risk import RiskAgent
+# Import the REAL agents, not the skeletons
+from app.agents.kpi import KpiAgent
+from app.agents.report import ReportAgent
+# Skeletons can be used for agents not yet implemented
+from app.agents.ingestion import IngestionAgent
+from app.agents.skeletons import StrategyAgent
+from app.agents.notification import NotifyWorker
 
 # Configure logging
 setup_logging()
@@ -24,30 +31,67 @@ def main():
     """
     Initializes and starts the agent scheduler.
     """
-    logger.info("Initializing scheduler...")
+    logger.info("Initializing scheduler and database connection...")
+
+    # Create a database session for agents that use SQLAlchemy ORM
+    db_session = SessionLocal()
+
+    try:
+        # A raw connection is still needed for agents that use it directly.
+        # In a real app, a connection pool would be better and all agents
+        # would likely use the same session management.
+        db_connection = psycopg.connect(settings.database_url)
+        logger.info("Database connection successful.")
+    except psycopg.OperationalError as e:
+        logger.critical(f"Failed to connect to the database: {e}")
+        db_session.close()
+        return
+
     scheduler = BlockingScheduler()
 
-    # Instantiate agents
-    ingestion_agent = IngestionAgent()
+    # Instantiate agents with db connection and dependencies
+    # The IngestionAgent now uses a SQLAlchemy session.
+    ingestion_agent = IngestionAgent(db_session=db_session, symbols=["BTC/USDT"])
     strategy_agent = StrategyAgent()
-    execution_agent = ExecutionAgent()
-    risk_agent = RiskAgent()
-    report_agent = ReportAgent()
+
+    # Instantiate the real, functional agents
+    execution_agent = ExecutionAgent(db_connection=db_connection)
+    risk_agent = RiskAgent(db_connection=db_connection, execution_agent=execution_agent)
+    kpi_agent = KpiAgent(db_connection=db_connection)
+    report_agent = ReportAgent(db_connection=db_connection)
+
+    # Instantiate the notification worker
+    if settings.telegram_bot_token:
+        notify_worker = NotifyWorker(db_connection=db_connection)
+        scheduler.add_job(notify_worker.run, 'interval', seconds=5, id='notify_worker')
+        logger.info("Notification worker has been scheduled.")
+    else:
+        logger.warning("TELEGRAM_BOT_TOKEN not set. Notification worker will not run.")
+
 
     # Schedule agents to run periodically
-    # Using a short interval for demonstration purposes
-    scheduler.add_job(ingestion_agent.run, 'interval', seconds=10, id='ingestion_agent')
-    scheduler.add_job(strategy_agent.run, 'interval', seconds=15, id='strategy_agent')
-    scheduler.add_job(execution_agent.run, 'interval', seconds=20, id='execution_agent')
-    scheduler.add_job(risk_agent.run, 'interval', seconds=25, id='risk_agent')
-    scheduler.add_job(report_agent.run, 'interval', seconds=30, id='report_agent')
+    # Note: The `execution_agent.run` expects a `TradingDecision`, so scheduling it
+    # to run on an interval like this is not correct. It should be triggered.
+    # We will leave it commented out as per the original design.
+    scheduler.add_job(ingestion_agent.run, 'interval', seconds=60, id='ingestion_agent')
+    scheduler.add_job(strategy_agent.run, 'interval', seconds=60, id='strategy_agent')
+    # scheduler.add_job(execution_agent.run, 'interval', seconds=20, id='execution_agent')
+    scheduler.add_job(risk_agent.run, 'interval', seconds=30, id='risk_agent')
+
+    # Schedule the new KPI and Report agents
+    scheduler.add_job(kpi_agent.run, 'interval', minutes=5, id='kpi_agent')
+    scheduler.add_job(report_agent.run, 'interval', hours=1, id='report_agent')
 
     try:
         logger.info("Scheduler started. Press Ctrl+C to exit.")
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         logger.info("Scheduler stopped.")
+    finally:
+        logger.info("Closing database connections and shutting down scheduler.")
         scheduler.shutdown()
+        db_connection.close()
+        db_session.close()
 
 if __name__ == "__main__":
     main()
