@@ -259,3 +259,74 @@ def test_full_pipeline_from_signal_to_risk_and_notification(e2e_db_session, capl
         assert "Executed partial_profit_1R for BTCUSD" in notification["message"]
 
     logger.info("SUCCESS: Step 3 complete. RiskAgent created a closing order and enqueued a notification.")
+
+
+def test_full_pipeline_sell_order_with_stop_loss(e2e_db_session, caplog):
+    """
+    Verifies the pipeline for a SELL order where the stop-loss is triggered.
+    """
+    # --- Helper functions ---
+    def get_row_count(table_name):
+        with e2e_db_session.cursor() as cursor:
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
+            return cursor.fetchone()[0]
+
+    # --- Arrange ---
+    exec_agent = ExecutionAgent(db_connection=e2e_db_session, account_id=1)
+    risk_agent = RiskAgent(db_connection=e2e_db_session, execution_agent=exec_agent, account_id=1)
+
+    # --- Step 1: Create a SELL decision ---
+    decision = TradingDecision(
+        symbol="BTC/USD",
+        side=TradeSide.SELL,
+        sl=61000.0, # Stop loss for a short position
+        tp=58000.0,
+        confidence=0.85,
+    )
+    exec_agent.run(decision)
+
+    # --- Assert initial order creation ---
+    assert get_row_count("orders") == 1
+    with e2e_db_session.cursor(row_factory=psycopg.rows.dict_row) as cursor:
+        cursor.execute("SELECT * FROM orders WHERE status = 'NEW';")
+        order = cursor.fetchone()
+        order_id = order["id"]
+        assert order["side"] == 'sell'
+        assert order["quantity"] == Decimal('0.01') # Hardcoded in agent
+
+    # --- Step 2: Simulate order fill ---
+    fill_price = 60000.0
+    with e2e_db_session.cursor() as cursor:
+        cursor.execute("UPDATE orders SET status = 'FILLED' WHERE id = %s;", (order_id,))
+        cursor.execute(
+            "INSERT INTO positions (account_id, exchange_instrument_id, quantity, average_entry_price, initial_stop_loss) VALUES (%s, %s, %s, %s, %s);",
+            (1, 1, -order["quantity"], fill_price, decision.stop_loss)
+        )
+    e2e_db_session.commit()
+
+    # --- Step 3: Trigger Stop Loss ---
+    # Price moves against the short position, above the stop loss
+    stop_loss_trigger_price = 61500.0
+
+    # The RiskAgent's _evaluate_position_risk has its own R-multiple calculation.
+    # We will mock the price and let the agent's logic run.
+    # The agent should identify this as R < -1.0
+    with patch.object(risk_agent, '_get_current_market_price', return_value=stop_loss_trigger_price):
+        # We need to add a stop-loss rule to the agent for this test
+        risk_agent.risk_rules.append(
+            {"name": "stop_loss", "profit_r": -1.0, "action": "close_full"}
+        )
+        # We also need to mock the _execute_risk_action to handle "close_full"
+        with patch.object(risk_agent, '_execute_risk_action') as mock_execute_action:
+            risk_agent.run()
+
+    # --- Assert: Risk action was called ---
+    # This is a simplified assertion. A more robust test would check the DB state
+    # after a real _execute_risk_action run.
+    assert mock_execute_action.called, "The risk action should have been triggered for the stop loss."
+
+    # We can inspect the call arguments to be more specific
+    call_args, _ = mock_execute_action.call_args
+    triggered_rule = call_args[1]
+    assert triggered_rule["name"] == "stop_loss"
+    logger.info("SUCCESS: Stop-loss rule was correctly triggered.")
