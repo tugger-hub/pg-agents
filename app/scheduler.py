@@ -9,6 +9,7 @@ import time
 import psycopg
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+from app.database import SessionLocal
 from app.log_config import setup_logging
 from app.config import settings
 # Import the REAL agents, not the skeletons
@@ -18,7 +19,8 @@ from app.agents.risk import RiskAgent
 from app.agents.kpi import KpiAgent
 from app.agents.report import ReportAgent
 # Skeletons can be used for agents not yet implemented
-from app.agents.skeletons import IngestionAgent, StrategyAgent
+from app.agents.ingestion import IngestionAgent
+from app.agents.skeletons import StrategyAgent
 from app.agents.notification import NotifyWorker
 
 # Configure logging
@@ -31,20 +33,25 @@ def main():
     """
     logger.info("Initializing scheduler and database connection...")
 
+    # Create a database session for agents that use SQLAlchemy ORM
+    db_session = SessionLocal()
+
     try:
-        # Establish database connection
-        # In a real app, a connection pool would be better.
+        # A raw connection is still needed for agents that use it directly.
+        # In a real app, a connection pool would be better and all agents
+        # would likely use the same session management.
         db_connection = psycopg.connect(settings.database_url)
         logger.info("Database connection successful.")
     except psycopg.OperationalError as e:
         logger.critical(f"Failed to connect to the database: {e}")
+        db_session.close()
         return
 
     scheduler = BlockingScheduler()
 
     # Instantiate agents with db connection and dependencies
-    # Note: Using placeholder skeletons for non-implemented agents
-    ingestion_agent = IngestionAgent(symbols=["BTC/USDT"]) # Example symbol
+    # The IngestionAgent now uses a SQLAlchemy session.
+    ingestion_agent = IngestionAgent(db_session=db_session, symbols=["BTC/USDT"])
     strategy_agent = StrategyAgent()
 
     # Instantiate the real, functional agents
@@ -80,7 +87,11 @@ def main():
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         logger.info("Scheduler stopped.")
+    finally:
+        logger.info("Closing database connections and shutting down scheduler.")
         scheduler.shutdown()
+        db_connection.close()
+        db_session.close()
 
 if __name__ == "__main__":
     main()

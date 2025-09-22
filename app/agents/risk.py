@@ -203,21 +203,36 @@ class RiskAgent(Agent):
         current_price = Decimal(current_price)
 
         # --- R-Multiple Calculation ---
-        initial_risk_per_unit = abs(entry_price - initial_sl)
-        if initial_risk_per_unit == 0:
+        # Determine the side of the trade for the calculation
+        side = TradeSide.BUY if quantity > 0 else TradeSide.SELL
+
+        r_multiple = calculate_r_multiple(
+            entry_price=float(entry_price),
+            current_price=float(current_price),
+            stop_loss_price=float(initial_sl),
+            side=side
+        )
+
+        if r_multiple is None:
             self.logger.warning(f"Initial risk is zero for position {position['id']}. Cannot calculate R-multiple.")
             return
-
-        # Profit is positive for long gains and short gains
-        profit_per_unit = (current_price - entry_price) if quantity > 0 else (entry_price - current_price)
-
-        r_multiple = profit_per_unit / initial_risk_per_unit
         self.logger.info(f"Position {position['id']} ({position['exchange_symbol']}): Current R-multiple is {r_multiple:.2f}")
 
         # --- Rule Evaluation ---
         # Check rules in descending order of profit, so the highest-R rule triggers.
         for rule in sorted(self.risk_rules, key=lambda r: r['profit_r'], reverse=True):
-            if r_multiple >= rule['profit_r']:
+            # For take-profit rules (profit_r > 0), we trigger if r_multiple is greater.
+            # For stop-loss rules (profit_r < 0), we trigger if r_multiple is less.
+            is_stop_loss_rule = rule['profit_r'] < 0
+            triggered = False
+            if is_stop_loss_rule:
+                if r_multiple <= rule['profit_r']:
+                    triggered = True
+            else:  # Is a take-profit rule
+                if r_multiple >= rule['profit_r']:
+                    triggered = True
+
+            if triggered:
                 self.logger.info(f"TRIGGERED: Rule '{rule['name']}' for position {position['id']} at R={r_multiple:.2f}")
                 # Add the calculated R-multiple to the position dict to pass to the action executor
                 position['r_multiple'] = r_multiple

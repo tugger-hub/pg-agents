@@ -9,3 +9,6 @@ pytest
 testcontainers[postgres]
 pydantic-settings
 PyYAML
+pandas
+numpy
+pytest-mock

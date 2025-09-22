@@ -63,22 +63,26 @@ class StrategySettings(BaseModel):
 
 # --- Pydantic-Settings Integration ---
 
-def yaml_config_source(settings: BaseSettings) -> Dict[str, Any]:
+class YamlConfigSource(PydanticBaseSettingsSource):
     """
     A pydantic-settings source that loads settings from a YAML file.
     """
-    config_path = BASE_DIR / "configs" / "strategy.yaml"
-    if not config_path.is_file():
-        logger.warning(f"YAML config file not found at: {config_path}")
-        return {}
+    def get_field_value(self, field, field_name):
+        # This source is not field-based, so we leave this method empty.
+        return None, None
 
-    try:
-        with open(config_path, "r") as f:
-            return yaml.safe_load(f) or {}
-    except (IOError, yaml.YAMLError) as e:
-        logger.error(f"Error reading or parsing YAML config: {e}")
-        return {}
+    def __call__(self) -> Dict[str, Any]:
+        config_path = BASE_DIR / "configs" / "strategy.yaml"
+        if not config_path.is_file():
+            logger.warning(f"YAML config file not found at: {config_path}")
+            return {}
 
+        try:
+            with open(config_path, "r") as f:
+                return yaml.safe_load(f) or {}
+        except (IOError, yaml.YAMLError) as e:
+            logger.error(f"Error reading or parsing YAML config: {e}")
+            return {}
 
 class AppSettings(BaseSettings):
     """
@@ -126,8 +130,9 @@ class AppSettings(BaseSettings):
         """
         return (
             init_settings,
+            dotenv_settings,
             env_settings,
-            yaml_config_source, # Our custom YAML source
+            YamlConfigSource(settings_cls),
         )
 
 # --- Singleton Instance ---

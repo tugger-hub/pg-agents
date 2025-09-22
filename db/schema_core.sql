@@ -233,3 +233,28 @@ CREATE TABLE IF NOT EXISTS system_configuration (
 
 -- Insert the default singleton configuration row if it doesn't exist.
 INSERT INTO system_configuration (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+
+-- Section: Market Data Storage (M3)
+-- Note: A periodic cleanup job should be implemented to enforce data retention
+-- policies (e.g., delete candles older than 30 days).
+CREATE TABLE IF NOT EXISTS candles (
+    id BIGSERIAL PRIMARY KEY,
+    symbol VARCHAR(50) NOT NULL,
+    timeframe VARCHAR(10) NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    open NUMERIC NOT NULL,
+    high NUMERIC NOT NULL,
+    low NUMERIC NOT NULL,
+    close NUMERIC NOT NULL,
+    volume NUMERIC NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Unique constraint to prevent duplicate candle entries
+CREATE UNIQUE INDEX IF NOT EXISTS ux_candles_symbol_tf_ts
+    ON candles (symbol, timeframe, timestamp);
+
+-- Index for efficient retrieval of recent candles for a symbol
+CREATE INDEX IF NOT EXISTS idx_candles_symbol_timestamp
+    ON candles (symbol, timestamp DESC);
