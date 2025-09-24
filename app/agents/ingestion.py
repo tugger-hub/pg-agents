@@ -1,10 +1,9 @@
-"""
-The IngestionAgent is responsible for collecting market data from exchanges.
-"""
+"""Ingestion agent responsible for collecting and persisting market data."""
 import logging
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Callable, Iterable, List, Optional
 
 import ccxt
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -21,43 +20,77 @@ class IngestionAgent(Agent):
     """
     Collects market data from a cryptocurrency exchange using ccxt.
 
-    - Fetches recent 1-minute OHLCV data for a predefined list of symbols.
+    - Fetches recent OHLCV data for a configured list of symbols.
     - Implements retry logic with exponential backoff for API calls.
-    - Caches trading rules for the symbols (placeholder).
+    - Stores candles in PostgreSQL using idempotent bulk inserts.
     """
 
     def __init__(
-        self, db_session: Session, symbols: List[str], exchange_id: str = "binance"
+        self,
+        db_session: Session | Callable[[], Session],
+        symbols: Iterable[str],
+        exchange_id: str = "binance",
+        exchange_client: Optional[ccxt.Exchange] = None,
+        timeframe: str = "1m",
+        ohlcv_limit: int = 200,
     ):
-        self.db_session = db_session
-        self.symbols = symbols
+        if isinstance(db_session, Session):
+            # Compatibility with legacy callers/tests that pass in a Session instance.
+            self._session_factory: Callable[[], Session] = lambda: db_session
+            self._manage_session = False
+        else:
+            # sessionmaker or a factory callable.
+            self._session_factory = db_session  # type: ignore[assignment]
+            self._manage_session = True
+
+        self.symbols = list(symbols)
         self.exchange_id = exchange_id
-        self.exchange = getattr(ccxt, self.exchange_id)()
+        self.timeframe = timeframe
+        self.ohlcv_limit = ohlcv_limit
+        self.exchange = exchange_client or getattr(ccxt, self.exchange_id)()
+        self.exchange.enableRateLimit = True
         self.logger = logging.getLogger(self.__class__.__name__)
-        self._trading_rules_cache = {}
+        self._trading_rules_cache: dict[str, dict] = {}
+
+    @contextmanager
+    def _session_scope(self):
+        session = self._session_factory()
+        try:
+            yield session
+            if self._manage_session:
+                session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            if self._manage_session:
+                session.close()
 
     def run(self):
         """The main entry point for the agent's logic."""
-        self.logger.info(f"IngestionAgent running for symbols: {self.symbols}")
+        self.logger.info("IngestionAgent running for symbols: %s", self.symbols)
         self._cache_trading_rules()
 
-        for symbol in self.symbols:
-            self.logger.info(f"Fetching market data for {symbol}...")
-            snapshots = self._fetch_ohlcv_with_retry(symbol, timeframe="1m", limit=200)
-            if snapshots:
-                self._save_snapshots_to_db(snapshots, timeframe="1m")
-            else:
-                self.logger.error(
-                    f"Failed to fetch market data for {symbol} after multiple retries."
+        with self._session_scope() as session:
+            for symbol in self.symbols:
+                self.logger.info("Fetching market data for %s...", symbol)
+                snapshots = self._fetch_ohlcv_with_retry(
+                    symbol, timeframe=self.timeframe, limit=self.ohlcv_limit
                 )
+                if snapshots:
+                    self._save_snapshots_to_db(session, snapshots, timeframe=self.timeframe)
+                else:
+                    self.logger.error(
+                        "Failed to fetch market data for %s after multiple retries.", symbol
+                    )
 
     def _save_snapshots_to_db(
-        self, snapshots: List[MarketSnapshot], timeframe: str
+        self, session: Session, snapshots: List[MarketSnapshot], timeframe: str
     ):
         """
         Saves a list of MarketSnapshot objects to the candles table.
 
-        This method uses a bulk insert with ON CONFLICT DO NOTHING to efficiently
+        Uses a bulk insert with ON CONFLICT DO NOTHING to efficiently
         insert new candles while ignoring duplicates.
         """
         if not snapshots:
@@ -77,36 +110,50 @@ class IngestionAgent(Agent):
             for s in snapshots
         ]
 
-        # Use PostgreSQL's ON CONFLICT DO NOTHING for idempotent inserts
         stmt = pg_insert(Candle).values(insert_values)
         stmt = stmt.on_conflict_do_nothing(
             index_elements=["symbol", "timeframe", "timestamp"]
         )
 
         try:
-            result = self.db_session.execute(stmt)
-            self.db_session.commit()
-            # The number of rows actually inserted might be useful.
-            # result.rowcount gives the number of rows affected.
+            result = session.execute(stmt)
+            if not self._manage_session:
+                session.commit()
             self.logger.info(
-                f"Saved {result.rowcount} new candles to DB for symbol "
-                f"'{snapshots[0].symbol}' and timeframe '{timeframe}'."
+                "Saved %s new candles to DB for symbol '%s' and timeframe '%s'.",
+                result.rowcount,
+                snapshots[0].symbol,
+                timeframe,
             )
-        except Exception as e:
-            self.logger.error(f"Database error while saving candles: {e}")
-            self.db_session.rollback()
+        except Exception as exc:
+            self.logger.error("Database error while saving candles: %s", exc)
+            session.rollback()
 
     def _cache_trading_rules(self):
         """
         Fetches and caches trading rules for the symbols.
 
-        Placeholder as per M3 requirements. In a real implementation, this would
-        fetch rules from the exchange and store them, potentially in the
-        `exchange_instruments` table or an in-memory cache.
+        For now the data is cached in-memory and primarily used for logging.
+        A future enhancement can persist the data to the exchange_instruments table
+        so that database triggers have richer metadata.
         """
-        self.logger.info("Caching trading rules (placeholder)...")
-        # Example: self._trading_rules_cache = self.exchange.load_markets()
-        pass
+        try:
+            markets = self.exchange.load_markets()
+        except Exception as exc:  # pragma: no cover - network branch
+            self.logger.warning("Unable to load markets for trading rules cache: %s", exc)
+            return
+
+        for symbol in self.symbols:
+            market = markets.get(symbol)
+            if not market:
+                continue
+            limits = market.get("limits", {}) or {}
+            precision = market.get("precision", {}) or {}
+            self._trading_rules_cache[symbol] = {
+                "limits": limits,
+                "precision": precision,
+            }
+        self.logger.debug("Cached trading rules for %s symbols", len(self._trading_rules_cache))
 
     def _fetch_ohlcv_with_retry(
         self,

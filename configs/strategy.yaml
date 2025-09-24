@@ -1,46 +1,97 @@
-# Strategy Parameters based on M4 from NEXT_STEPS_TODO_v2.md
-# This file provides default settings for the StrategyAgent.
-# These values can be overridden by environment variables.
+# Application configuration defaults for the Solo-Lite auto-trading stack.
+# Values here can be overridden via environment variables (see .env.template).
 
-# Time frame mapping
-timeframes:
-  trend: "1d" # Primary trend timeframe (e.g., 1d, 4h)
-  entry: "1h" # Entry signal timeframe (e.g., 1h, 15m)
+symbols:
+  - "BTC/USDT"
+  - "ETH/USDT"
 
-# Volume confirmation settings
-volume_confirmation:
-  enabled: true
-  ma_period: 20
-  multiplier: 1.5 # Breakout confirmed if volume is >= 1.5x the 20-period MA
+exchange:
+  id: "binance"
+  default_order_size: 0.01
+  enable_live_trading: false
+  sandbox_mode: true
+  api_key: ""
+  api_secret: ""
+  api_password: ""
 
-# Retest definition (as a descriptive string/flag)
-retest_rule:
-  # Defines what constitutes a successful retest of a support/resistance level.
-  # "candle_close_confirmation" means the price must retest the level and then
-  # a candle must close back above (for support) or below (for resistance).
-  success_condition: "candle_close_confirmation"
+notifications:
+  alert_chat_id:
+  report_chat_id:
 
-# Stop-loss, take-profit, and trailing stop settings
-risk_management:
-  # Method for calculating stop-loss: "atr" or "percentage"
-  stop_loss_method: "atr"
-  atr_period: 14
-  atr_multiplier: 2.0
-  percentage_sl: 3.0 # e.g., 3.0 means a 3% stop-loss from entry
+strategy:
+  # Time frame mapping
+  timeframes:
+    trend: "1d"
+    entry: "1h"
 
-  # Invalidation point logic is complex and will be handled in the agent's logic,
-  # but these parameters can guide it.
+  # Volume confirmation settings
+  volume_confirmation:
+    enabled: true
+    ma_period: 20
+    multiplier: 1.5
 
-# Default risk ratio per trade
-default_risk:
-  # The percentage of total capital to risk on a single trade.
-  ratio: 1.0 # e.g., 1.0 means 1% of capital
+  # Retest definition (as a descriptive string/flag)
+  retest_rule:
+    success_condition: "candle_close_confirmation"
 
-# Signal confidence and cooldown
-signal_confidence:
-  # Minimum confidence threshold required to consider a signal valid.
-  # This is a placeholder for a future scoring system.
-  threshold: 0.7 # e.g., 70% confidence
-  # Cooldown period in seconds after a signal is generated for the same symbol
-  # to avoid rapid-fire trades. 0 to disable.
-  cooldown_seconds: 3600 # 1 hour
+  # Stop-loss, take-profit, and trailing stop settings
+  risk_management:
+    stop_loss_method: "atr"
+    atr_period: 14
+    atr_multiplier: 2.0
+    atr_take_profit_r_multiple: 2.0
+    percentage_sl: 3.0
+    account_equity_usd: 10000.0
+
+  # Default risk ratio per trade (percentage)
+  default_risk:
+    ratio: 1.0
+
+  # Signal confidence and cooldown
+  signal_confidence:
+    threshold: 0.7
+    cooldown_seconds: 3600
+
+  # Moving average crossover settings
+  moving_average:
+    fast_period: 9
+    slow_period: 21
+    trend_period: 200
+
+  macd:
+    fast_period: 12
+    slow_period: 26
+    signal_period: 9
+
+  volume_breakout:
+    lookback: 20
+    volume_ma_period: 20
+    volume_multiplier: 2.0
+    breakout_buffer_pct: 0.001
+
+  divergence:
+    rsi_period: 14
+    window: 20
+    bullish_rsi_floor: 30.0
+    bearish_rsi_ceiling: 70.0
+    min_price_change_pct: 0.003
+    min_rsi_change: 3.0
+
+  retest:
+    lookback: 30
+    tolerance_pct: 0.002
+    confirmation_bars: 3
+
+  switches:
+    ema_trend_pullback: true
+    volume_breakout: true
+    rsi_divergence: true
+    breakout_retest: true
+    macd_crossover: false
+
+  # Position sizing controls
+  position_sizing:
+    account_equity_usd: 10000.0
+    risk_per_trade_percent: 1.0
+    max_position_notional_usd: 500.0
+    min_position_notional_usd: 10.0

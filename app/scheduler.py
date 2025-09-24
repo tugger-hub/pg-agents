@@ -1,97 +1,130 @@
-"""
-Main entry point for the application.
-
-This script initializes and runs the scheduler, which in turn triggers the agents.
-"""
+"""Main entry point that wires up agents and the scheduler."""
 import logging
-import time
+from typing import Optional
 
+import ccxt
 import psycopg
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+from app.agents.execution import ExecutionAgent
+from app.agents.ingestion import IngestionAgent
+from app.agents.kpi import KpiAgent
+from app.agents.notification import NotifyWorker
+from app.agents.report import ReportAgent
+from app.agents.risk import RiskAgent
+from app.agents.strategy import StrategyAgent
+from app.config import settings
 from app.database import SessionLocal
 from app.log_config import setup_logging
-from app.config import settings
-# Import the REAL agents, not the skeletons
-from app.agents.execution import ExecutionAgent
-from app.agents.risk import RiskAgent
-# Import the REAL agents, not the skeletons
-from app.agents.kpi import KpiAgent
-from app.agents.report import ReportAgent
-# Skeletons can be used for agents not yet implemented
-from app.agents.ingestion import IngestionAgent
-from app.agents.skeletons import StrategyAgent
-from app.agents.notification import NotifyWorker
 
-# Configure logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-def main():
-    """
-    Initializes and starts the agent scheduler.
-    """
-    logger.info("Initializing scheduler and database connection...")
 
-    # Create a database session for agents that use SQLAlchemy ORM
-    db_session = SessionLocal()
+def _build_exchange_client() -> Optional[ccxt.Exchange]:
+    cfg = settings.exchange
+    try:
+        exchange_cls = getattr(ccxt, cfg.id)
+    except AttributeError:
+        logger.error("Unsupported exchange id '%s'", cfg.id)
+        return None
+
+    params = {"enableRateLimit": True}
+    if cfg.api_key:
+        params["apiKey"] = cfg.api_key
+    if cfg.api_secret:
+        params["secret"] = cfg.api_secret
+    if cfg.api_password:
+        params["password"] = cfg.api_password
+
+    client = exchange_cls(params)
+    if hasattr(client, "set_sandbox_mode"):
+        client.set_sandbox_mode(cfg.sandbox_mode)
+    client.enableRateLimit = True
+    return client
+
+
+def main():
+    """Initializes and starts the agent scheduler."""
+    logger.info("Bootstrapping scheduler and database connections...")
 
     try:
-        # A raw connection is still needed for agents that use it directly.
-        # In a real app, a connection pool would be better and all agents
-        # would likely use the same session management.
         db_connection = psycopg.connect(settings.database_url)
-        logger.info("Database connection successful.")
-    except psycopg.OperationalError as e:
-        logger.critical(f"Failed to connect to the database: {e}")
-        db_session.close()
+        logger.info("Primary database connection ready.")
+    except psycopg.OperationalError as exc:
+        logger.critical("Failed to connect to the database: %s", exc)
         return
+
+    exchange_client = _build_exchange_client()
+    if settings.exchange.enable_live_trading and not exchange_client:
+        logger.warning(
+            "Live trading requested but no exchange client could be constructed. "
+            "Falling back to DB-only mode."
+        )
 
     scheduler = BlockingScheduler()
 
-    # Instantiate agents with db connection and dependencies
-    # The IngestionAgent now uses a SQLAlchemy session.
-    ingestion_agent = IngestionAgent(db_session=db_session, symbols=["BTC/USDT"])
-    strategy_agent = StrategyAgent()
+    ingestion_agent = IngestionAgent(
+        db_session=SessionLocal,
+        symbols=settings.trading_symbols,
+        exchange_id=settings.exchange.id,
+        exchange_client=exchange_client,
+        timeframe=settings.strategy.timeframes.entry,
+    )
+    strategy_agent = StrategyAgent(
+        db_session=SessionLocal,
+        symbols=settings.trading_symbols,
+        timeframe=settings.strategy.timeframes.entry,
+    )
 
-    # Instantiate the real, functional agents
-    execution_agent = ExecutionAgent(db_connection=db_connection)
-    risk_agent = RiskAgent(db_connection=db_connection, execution_agent=execution_agent)
+    execution_agent = ExecutionAgent(
+        db_connection=db_connection,
+        account_id=1,
+        exchange_client=exchange_client,
+        submit_to_exchange=settings.exchange.enable_live_trading,
+        default_order_size=settings.exchange.default_order_size,
+    )
+    risk_agent = RiskAgent(
+        db_connection=db_connection,
+        execution_agent=execution_agent,
+        price_timeframe=settings.strategy.timeframes.entry,
+        alert_chat_id=settings.notifications.alert_chat_id,
+    )
     kpi_agent = KpiAgent(db_connection=db_connection)
-    report_agent = ReportAgent(db_connection=db_connection)
+    report_agent = ReportAgent(
+        db_connection=db_connection,
+        report_chat_id=settings.notifications.report_chat_id,
+    )
 
-    # Instantiate the notification worker
+    def trading_cycle():
+        logger.debug("Running trading cycle")
+        ingestion_agent.run()
+        decisions = strategy_agent.run()
+        for decision in decisions:
+            execution_agent.run(decision)
+
+    scheduler.add_job(trading_cycle, "interval", seconds=60, id="trading_cycle")
+    scheduler.add_job(risk_agent.run, "interval", seconds=30, id="risk_agent")
+    scheduler.add_job(kpi_agent.run, "interval", minutes=5, id="kpi_agent")
+    scheduler.add_job(report_agent.run, "interval", hours=1, id="report_agent")
+
     if settings.telegram_bot_token:
         notify_worker = NotifyWorker(db_connection=db_connection)
-        scheduler.add_job(notify_worker.run, 'interval', seconds=5, id='notify_worker')
-        logger.info("Notification worker has been scheduled.")
+        scheduler.add_job(notify_worker.run, "interval", seconds=5, id="notify_worker")
+        logger.info("Notification worker scheduled.")
     else:
-        logger.warning("TELEGRAM_BOT_TOKEN not set. Notification worker will not run.")
-
-
-    # Schedule agents to run periodically
-    # Note: The `execution_agent.run` expects a `TradingDecision`, so scheduling it
-    # to run on an interval like this is not correct. It should be triggered.
-    # We will leave it commented out as per the original design.
-    scheduler.add_job(ingestion_agent.run, 'interval', seconds=60, id='ingestion_agent')
-    scheduler.add_job(strategy_agent.run, 'interval', seconds=60, id='strategy_agent')
-    # scheduler.add_job(execution_agent.run, 'interval', seconds=20, id='execution_agent')
-    scheduler.add_job(risk_agent.run, 'interval', seconds=30, id='risk_agent')
-
-    # Schedule the new KPI and Report agents
-    scheduler.add_job(kpi_agent.run, 'interval', minutes=5, id='kpi_agent')
-    scheduler.add_job(report_agent.run, 'interval', hours=1, id='report_agent')
+        logger.warning("TELEGRAM_BOT_TOKEN not set. Notification worker disabled.")
 
     try:
         logger.info("Scheduler started. Press Ctrl+C to exit.")
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Scheduler stopped.")
+        logger.info("Scheduler stopped by operator.")
     finally:
-        logger.info("Closing database connections and shutting down scheduler.")
-        scheduler.shutdown()
+        logger.info("Shutting down scheduler and closing resources.")
+        scheduler.shutdown(wait=False)
         db_connection.close()
-        db_session.close()
+
 
 if __name__ == "__main__":
     main()

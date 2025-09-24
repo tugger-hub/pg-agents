@@ -8,28 +8,30 @@
 
 ### 1.1. 시스템 가동 및 중지
 
-시스템은 `docker-compose` 또는 `systemd`를 통해 단일 서비스로 관리됩니다.
+시스템은 `python -m app.scheduler` 혹은 `docker-compose`/`systemd`로 관리할 수 있습니다.
+에이전트가 사용하는 모든 설정은 `.env` 와 `configs/strategy.yaml`에서 제어합니다.
 
-- **가동 (Docker):**
+- **로컬 실행:**
+  ```bash
+  source .venv/bin/activate
+  python -m app.scheduler
+  ```
+- **Docker:**
   ```bash
   docker-compose up -d
   ```
-- **중지 (Docker):**
-  ```bash
-  docker-compose down
-  ```
-- **가동 (systemd):**
+- **systemd:**
   ```bash
   sudo systemctl start pg-solo-lite.service
   ```
-- **중지 (systemd):**
-  ```bash
-  sudo systemctl stop pg-solo-lite.service
-  ```
+
+- **중지:** 해당 런타임에 맞게 `Ctrl+C`, `docker-compose down`, `systemctl stop` 등을 사용합니다.
+
+> ⚠️ `EXCHANGE__ENABLE_LIVE_TRADING=true` 로 전환하기 전에, API Key/Secret·텔레그램 채널 등의 운영 정보를 반드시 재확인하세요.
 
 ### 1.2. 알림 워커
 
-시스템은 텔레그램 알림을 위해 데이터베이스 기반의 **아웃박스 패턴**을 사용합니다. 이 방식은 알림 전송을 보장하고 재시도/실패를 안정적으로 관리합니다.
+시스템은 텔레그램 알림을 위해 데이터베이스 기반의 **아웃박스 패턴**을 사용합니다. 이 방식은 알림 전송을 보장하고 재시도/실패를 안정적으로 관리합니다. `configs/strategy.yaml` 또는 환경변수로 `notifications.alert_chat_id`/`notifications.report_chat_id`를 설정해야 합니다. 전략 모듈은 `strategy.switches` 옵션으로 개별 활성화/비활성화 가능합니다(EMA 추세 되돌림, 거래량 돌파, RSI 다이버전스, 돌파-리테스트, MACD 교차).
 
 - **작동 원리:**
   1.  애플리케이션 로직은 `notification_outbox` 테이블에 알림 메시지를 `PENDING` 상태로 삽입합니다.

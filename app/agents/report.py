@@ -2,16 +2,15 @@
 Agent responsible for generating and sending performance reports.
 """
 import logging
-import psycopg
 from datetime import datetime
+from typing import Optional
+
+import psycopg
 
 from .base import Agent
 from app.models import OpsKpiSnapshot
 
 logger = logging.getLogger(__name__)
-
-# In a real application, this would come from a config or user settings in the DB
-DEFAULT_REPORT_CHAT_ID = -1001234567890 # Placeholder Channel ID
 
 class ReportAgent(Agent):
     """
@@ -19,7 +18,7 @@ class ReportAgent(Agent):
     and sends it as a notification.
     """
 
-    def __init__(self, db_connection: psycopg.Connection):
+    def __init__(self, db_connection: psycopg.Connection, report_chat_id: Optional[int] = None):
         """
         Initializes the ReportAgent.
 
@@ -27,6 +26,7 @@ class ReportAgent(Agent):
             db_connection: An active psycopg connection to the database.
         """
         self.db_connection = db_connection
+        self.report_chat_id = report_chat_id
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def run(self):
@@ -97,13 +97,17 @@ class ReportAgent(Agent):
         """
         Enqueues the report message in the notification outbox.
         """
-        self.logger.info(f"Enqueuing report for chat_id: {DEFAULT_REPORT_CHAT_ID}")
+        if not self.report_chat_id:
+            self.logger.warning("Report chat id not configured; skipping notification enqueue.")
+            return
+
+        self.logger.info(f"Enqueuing report for chat_id: {self.report_chat_id}")
         with self.db_connection.cursor() as cursor:
             # Use the enqueue_notification function in the DB
             cursor.execute(
                 "SELECT enqueue_notification(%s, %s, %s, %s, %s);",
                 (
-                    DEFAULT_REPORT_CHAT_ID,
+                    self.report_chat_id,
                     'INFO', # severity
                     'Daily KPI Report', # title
                     message,

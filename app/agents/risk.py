@@ -3,9 +3,11 @@ The RiskAgent is responsible for monitoring active positions and applying
 risk management rules, such as trailing stops or partial profit taking.
 """
 import logging
-import psycopg
 from decimal import Decimal
 from datetime import datetime, timezone
+from typing import Optional
+
+import psycopg
 
 from .base import Agent
 from .execution import ExecutionAgent
@@ -28,7 +30,14 @@ class RiskAgent(Agent):
     - Sending notifications for all actions taken.
     """
 
-    def __init__(self, db_connection, execution_agent: ExecutionAgent, account_id: int = 1):
+    def __init__(
+        self,
+        db_connection,
+        execution_agent: ExecutionAgent,
+        account_id: int = 1,
+        price_timeframe: str = "1m",
+        alert_chat_id: Optional[int] = None,
+    ):
         """
         Initializes the RiskAgent with a database connection and an execution agent.
 
@@ -40,6 +49,8 @@ class RiskAgent(Agent):
         self.db = db_connection
         self.execution_agent = execution_agent
         self.account_id = account_id
+        self.price_timeframe = price_timeframe
+        self.alert_chat_id = alert_chat_id or self._resolve_default_alert_chat()
         self.logger = logging.getLogger(self.__class__.__name__)
         self._define_risk_rules()
 
@@ -59,6 +70,27 @@ class RiskAgent(Agent):
         ]
         self.logger.info(f"Loaded {len(self.risk_rules)} risk rules.")
 
+    def _resolve_default_alert_chat(self) -> Optional[int]:
+        try:
+            with self.db.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT chat_id
+                    FROM telegram_chats
+                    WHERE enabled = TRUE
+                    ORDER BY min_severity ASC
+                    LIMIT 1;
+                    """
+                )
+                row = cursor.fetchone()
+                if row:
+                    self.logger.info("Using chat_id %s for risk alerts", row[0])
+                    return int(row[0])
+        except psycopg.Error as exc:
+            self.logger.warning("Could not resolve default alert chat id: %s", exc)
+            self.db.rollback()
+        return None
+
     def _get_active_positions(self) -> list[dict]:
         """
         Fetches all active positions (quantity != 0) for the agent's account.
@@ -68,11 +100,13 @@ class RiskAgent(Agent):
             p.id,
             p.exchange_instrument_id,
             ei.exchange_symbol,
+            i.symbol AS instrument_symbol,
             p.quantity,
             p.average_entry_price,
             p.initial_stop_loss
         FROM positions p
         JOIN exchange_instruments ei ON p.exchange_instrument_id = ei.id
+        JOIN instruments i ON ei.instrument_id = i.id
         WHERE p.account_id = %s AND p.quantity != 0;
         """
         positions = []
@@ -127,14 +161,16 @@ class RiskAgent(Agent):
 
             # 2. Send a CRITICAL notification
             self.logger.info("Sending CRITICAL notification for loss limit breach.")
+            if not self.alert_chat_id:
+                self.logger.warning("Loss limit breached but no alert_chat_id configured; notification skipped.")
+                return
+
             try:
                 with self.db.cursor() as cursor:
-                    # In a real system, this chat_id would come from a config for admin alerts.
-                    admin_chat_id = 1
                     notify_sql = "SELECT enqueue_notification(%s, 'CRITICAL', %s, %s, %s);"
                     title = "!!! TRADING HALTED - LOSS LIMIT BREACHED !!!"
                     dedupe_key = f"loss-limit-breach-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
-                    cursor.execute(notify_sql, (admin_chat_id, title, breach_reason, dedupe_key))
+                    cursor.execute(notify_sql, (self.alert_chat_id, title, breach_reason, dedupe_key))
                     self.db.commit()
                     self.logger.info("Successfully enqueued CRITICAL notification.")
             except psycopg.Error as e:
@@ -163,17 +199,39 @@ class RiskAgent(Agent):
             self._evaluate_position_risk(position)
 
     def _get_current_market_price(self, symbol: str) -> float | None:
-        """
-        [PLACEHOLDER] Fetches the current market price for a symbol.
+        """Fetches the most recent close price for the supplied symbol."""
+        symbol_variants = [symbol]
+        if "/" in symbol:
+            symbol_variants.append(symbol.replace("/", ""))
+        else:
+            # naive conversion e.g. BTCUSDT -> BTC/USDT
+            base = symbol[:-4]
+            quote = symbol[-4:]
+            symbol_variants.append(f"{base}/{quote}")
 
-        TODO: This needs to be implemented to fetch data from the IngestionAgent's
-        output (e.g., a 'candles' table or a shared in-memory snapshot).
-        For now, we'll simulate a price for development.
-        """
-        self.logger.warning(f"Using placeholder market price for {symbol}")
-        if "BTC" in symbol:
-            return 70000.0  # Simulate a profitable move
-        return 100.0
+        for candidate in symbol_variants:
+            try:
+                with self.db.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT close
+                        FROM candles
+                        WHERE symbol = %s AND timeframe = %s
+                        ORDER BY timestamp DESC
+                        LIMIT 1;
+                        """,
+                        (candidate, self.price_timeframe),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        return float(row[0])
+            except psycopg.Error as exc:
+                self.logger.error("Failed to fetch market price for %s: %s", symbol, exc)
+                self.db.rollback()
+                return None
+
+        self.logger.warning("No recent candle found for %s", symbol)
+        return None
 
     def _evaluate_position_risk(self, position: dict):
         """
@@ -250,79 +308,95 @@ class RiskAgent(Agent):
         self.logger.info(f"Executing action '{action}' for position {position['id']}")
 
         # For now, we only implement 'close_partial'. Other actions are placeholders.
+        position_qty = Decimal(position['quantity'])
+        abs_position_qty = abs(position_qty)
+
+        close_qty = None
         if action == "close_partial":
             percentage_str = str(rule.get("params", {}).get("percentage", "0.0"))
             percentage = Decimal(percentage_str)
 
-            if not (Decimal('0') < percentage <= Decimal('1.0')):
-                self.logger.error(f"Invalid percentage {percentage} for close_partial. Must be between 0 and 1.")
+            if not (Decimal("0") < percentage <= Decimal("1.0")):
+                self.logger.error(
+                    "Invalid percentage %s for close_partial. Must be between 0 and 1.",
+                    percentage,
+                )
                 return
 
-            # 1. Determine order parameters
-            position_qty = Decimal(position['quantity'])
-            close_qty = position_qty * percentage
-            # Side is the opposite of the current position
-            close_side = TradeSide.SELL if position_qty > 0 else TradeSide.BUY
+            close_qty = abs_position_qty * percentage
+        elif action == "close_full":
+            close_qty = abs_position_qty
+        else:
+            self.logger.warning(f"Action '{action}' is not yet implemented.")
+            return
 
-            # 2. Create a TradingDecision for the closing order
-            decision = TradingDecision(
-                symbol=position['exchange_symbol'],
-                side=close_side,
-                quantity=float(close_qty), # Pass the calculated quantity
-                # SL/TP for a closing order is typically not needed. Pydantic requires them.
-                sl=0,
-                tp=0,
-                confidence=1.0 # High confidence as it's a risk management action
+        if close_qty is None or close_qty <= 0:
+            self.logger.warning("Computed close quantity is non-positive for position %s", position["id"])
+            return
+
+        close_side = TradeSide.SELL if position_qty > 0 else TradeSide.BUY
+        decision_symbol = position.get("instrument_symbol") or position['exchange_symbol']
+
+        decision = TradingDecision(
+            symbol=decision_symbol,
+            side=close_side,
+            quantity=float(close_qty),
+            stop_loss=0.0,
+            take_profit=0.0,
+            confidence=1.0,
+        )
+
+        order_id = self.execution_agent.run(decision)
+        if order_id is None:
+            self.logger.error(
+                "Failed to create closing order for position %s (rule %s).",
+                position['id'],
+                rule['name'],
             )
+            return
 
-            # 3. Use ExecutionAgent to place the order and get its ID.
-            # The ExecutionAgent's `run` method handles DB insertion and returns the order ID.
-            # We assume the `run` method is adapted to return the ID for this use case.
-            # NOTE: This is a conceptual adaptation. The current ExecutionAgent does not return the ID.
-            # We will simulate this by calling its internal method for now, which is not ideal but necessary.
-            order_id = self.execution_agent._execute_decision(decision)
-            if order_id is None:
-                self.logger.error(f"Failed to create closing order for position {position['id']}.")
-                return
-
-            # 4. Log the action to the 'transactions' table
-            try:
-                with self.db.cursor() as cursor:
-                    tx_sql = """
+        try:
+            with self.db.cursor() as cursor:
+                tx_sql = """
                     INSERT INTO transactions (account_id, related_order_id, transaction_type, amount)
                     VALUES (%s, %s, %s, %s);
                     """
-                    tx_type = f"RISK_ACTION_{rule['name'].upper()}"
-                    # Amount is the quantity of the asset transacted
-                    cursor.execute(tx_sql, (self.account_id, order_id, tx_type, close_qty))
-                    self.db.commit()
-                    self.logger.info(f"Logged risk action to transactions table for order {order_id}.")
-            except psycopg.Error as e:
-                self.logger.error(f"Failed to log risk action transaction: {e}")
-                self.db.rollback()
-                # If logging fails, we have an orphan order. This needs a robust reconciliation process.
-                return
+                tx_type = f"RISK_ACTION_{rule['name'].upper()}"
+                cursor.execute(tx_sql, (self.account_id, order_id, tx_type, close_qty))
+                self.db.commit()
+                self.logger.info(
+                    "Logged risk action to transactions table for order %s.", order_id
+                )
+        except psycopg.Error as e:
+            self.logger.error(f"Failed to log risk action transaction: {e}")
+            self.db.rollback()
+            return
 
-            # 5. Enqueue a notification
-            try:
-                with self.db.cursor() as cursor:
-                    # The enqueue_notification function is defined in the DB schema
-                    notify_sql = "SELECT enqueue_notification(%s, %s, %s, %s, %s);"
-                    chat_id = -1 # Placeholder chat_id
-                    severity = 'INFO'
-                    title = f"Risk Action: {rule['name']}"
-                    message = (f"Executed {rule['name']} for {position['exchange_symbol']}.\n"
-                               f"Closed {close_qty:.4f} at R-multiple {position['r_multiple']:.2f}.")
-                    dedupe_key = f"risk-action-{position['id']}-{rule['name']}-{order_id}"
-                    cursor.execute(notify_sql, (chat_id, severity, title, message, dedupe_key))
-                    self.db.commit()
-                    self.logger.info(f"Enqueued notification for risk action on position {position['id']}.")
-            except psycopg.Error as e:
-                self.logger.error(f"Failed to enqueue notification: {e}")
-                self.db.rollback()
+        if not self.alert_chat_id:
+            return
 
-        else:
-            self.logger.warning(f"Action '{action}' is not yet implemented.")
+        try:
+            with self.db.cursor() as cursor:
+                notify_sql = "SELECT enqueue_notification(%s, %s, %s, %s, %s);"
+                severity = 'INFO'
+                title = f"Risk Action: {rule['name']}"
+                r_multiple = position.get('r_multiple', 0.0)
+                message = (
+                    f"Executed {rule['name']} for {decision_symbol}.\n"
+                    f"Closed {float(close_qty):.4f} at R-multiple {r_multiple:.2f}."
+                )
+                dedupe_key = f"risk-action-{position['id']}-{rule['name']}-{order_id}"
+                cursor.execute(
+                    notify_sql,
+                    (self.alert_chat_id, severity, title, message, dedupe_key),
+                )
+                self.db.commit()
+                self.logger.info(
+                    "Enqueued notification for risk action on position %s.", position['id']
+                )
+        except psycopg.Error as e:
+            self.logger.error(f"Failed to enqueue notification: {e}")
+            self.db.rollback()
 
 
 def calculate_r_multiple(

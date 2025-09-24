@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 # Assuming the use of psycopg, as it's a common choice mentioned in docs
 import psycopg
+import ccxt
 
 from ..models import TradingDecision, TradeSide
 from ..services.system import get_system_configuration
@@ -27,7 +28,14 @@ class ExecutionAgent(Agent):
       for duplicate orders).
     """
 
-    def __init__(self, db_connection, account_id: int = 1):
+    def __init__(
+        self,
+        db_connection,
+        account_id: int = 1,
+        exchange_client: ccxt.Exchange | None = None,
+        submit_to_exchange: bool = False,
+        default_order_size: float = 0.01,
+    ):
         """
         Initializes the ExecutionAgent with a database connection.
 
@@ -38,6 +46,9 @@ class ExecutionAgent(Agent):
         self.db = db_connection
         self.account_id = account_id
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.exchange_client = exchange_client
+        self.submit_to_exchange = submit_to_exchange and exchange_client is not None
+        self.default_order_size = default_order_size
 
     def run(self, decision: TradingDecision):
         """
@@ -45,7 +56,7 @@ class ExecutionAgent(Agent):
         This method will be called by the scheduler with a trading decision.
         """
         self.logger.info(f"Received decision: {decision.model_dump_json()}")
-        self._execute_decision(decision)
+        return self._execute_decision(decision)
 
     def _generate_idempotency_key(self, decision: TradingDecision) -> str:
         """
@@ -114,12 +125,13 @@ class ExecutionAgent(Agent):
         # We assume a 'market' order for now, as it's not in TradingDecision.
         # Price is NULL for market orders.
         # Use quantity from the decision if provided, otherwise use the placeholder default.
-        quantity_to_use = decision.quantity if decision.quantity is not None else 0.01
+        quantity_to_use = decision.quantity if decision.quantity is not None else self.default_order_size
 
         order_to_insert = {
             "account_id": self.account_id,
             "exchange_instrument_id": exchange_instrument_id,
             "idempotency_key": idempotency_key,
+            "client_order_id": idempotency_key[:100],
             "side": decision.side.value,
             "type": "market",
             "status": "NEW",
@@ -142,9 +154,16 @@ class ExecutionAgent(Agent):
                 cursor.execute(sql, order_to_insert)
                 order_id = cursor.fetchone()[0]
                 self.db.commit()
-                self.logger.info(f"Successfully inserted order with ID: {order_id} and idempotency_key: {idempotency_key}")
-                self.logger.info("TODO: Submit order to the exchange via CCXT.")
-                return order_id
+                self.logger.info(
+                    "Successfully inserted order with ID %s and idempotency_key %s",
+                    order_id,
+                    idempotency_key,
+                )
+
+            if self.submit_to_exchange:
+                self._forward_to_exchange(decision, quantity_to_use, order_id, idempotency_key)
+
+            return order_id
 
         except psycopg.errors.UniqueViolation:
             self.logger.warning(
@@ -164,3 +183,57 @@ class ExecutionAgent(Agent):
             self.logger.critical(f"An unexpected database error occurred: {e}")
             self.db.rollback()
             return None
+
+    def _forward_to_exchange(
+        self,
+        decision: TradingDecision,
+        quantity: float,
+        order_id: int,
+        idempotency_key: str,
+    ) -> None:
+        if not self.exchange_client:
+            self.logger.warning("submit_to_exchange=True but no exchange client was provided.")
+            return
+
+        try:
+            self.logger.info(
+                "Submitting order %s to exchange %s", order_id, self.exchange_client.id
+            )
+            response = self.exchange_client.create_order(
+                symbol=decision.symbol,
+                type="market",
+                side=decision.side.value,
+                amount=quantity,
+            )
+            exchange_order_id = response.get("id") or response.get("orderId")
+            if exchange_order_id:
+                with self.db.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE orders SET exchange_order_id = %s WHERE id = %s",
+                        (str(exchange_order_id), order_id),
+                    )
+                self.db.commit()
+            self.logger.info(
+                "Exchange accepted order %s (exchange_order_id=%s)",
+                order_id,
+                exchange_order_id,
+            )
+        except ccxt.BaseError as exc:  # pragma: no cover - network branch
+            self.logger.error("Exchange order submission failed: %s", exc)
+            self._mark_order_rejected(order_id, reason="EXCHANGE_ERROR")
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.error("Unexpected error while submitting order to exchange: %s", exc)
+            self._mark_order_rejected(order_id, reason="UNKNOWN_ERROR")
+
+    def _mark_order_rejected(self, order_id: int, reason: str) -> None:
+        try:
+            with self.db.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE orders SET status = 'REJECTED', updated_at = NOW() WHERE id = %s",
+                    (order_id,),
+                )
+            self.db.commit()
+            self.logger.warning("Order %s marked as REJECTED (%s)", order_id, reason)
+        except psycopg.Error as exc:
+            self.logger.error("Failed to mark order %s as rejected: %s", order_id, exc)
+            self.db.rollback()
